@@ -10,7 +10,7 @@ import anthropic
 
 from herald.collector import Artifacts
 
-ContentType = Literal["release", "digest", "spotlight"]
+ContentType = Literal["release", "digest", "spotlight", "introduction"]
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
