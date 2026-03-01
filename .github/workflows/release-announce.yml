@@ -1,0 +1,72 @@
+name: announce
+
+# Example workflow: announce releases to Discord and Twitter.
+# Copy this into your project's .github/workflows/ and configure secrets.
+#
+# Required secrets:
+#   HERALD_ANTHROPIC_API_KEY - for LLM content generation
+#   HERALD_DISCORD_WEBHOOK_URL - for Discord posting
+#   HERALD_TWITTER_CONSUMER_KEY, HERALD_TWITTER_CONSUMER_SECRET,
+#   HERALD_TWITTER_ACCESS_TOKEN, HERALD_TWITTER_ACCESS_TOKEN_SECRET - for Twitter
+
+on:
+  release:
+    types: [published]
+
+  # Weekly digest every Monday at 3pm UTC
+  schedule:
+    - cron: "0 15 * * 1"
+
+  workflow_dispatch:
+    inputs:
+      content_type:
+        description: "Content type"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - digest
+          - spotlight
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install herald
+        run: uv pip install herald-announce
+
+      - name: Determine content type
+        id: content-type
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "type=digest" >> $GITHUB_OUTPUT
+            echo "days=7" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ inputs.content_type }}" >> $GITHUB_OUTPUT
+            echo "days=7" >> $GITHUB_OUTPUT
+          else
+            echo "type=release" >> $GITHUB_OUTPUT
+            echo "days=1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish announcements
+        env:
+          HERALD_ANTHROPIC_API_KEY: ${{ secrets.HERALD_ANTHROPIC_API_KEY }}
+          HERALD_DISCORD_WEBHOOK_URL: ${{ secrets.HERALD_DISCORD_WEBHOOK_URL }}
+          HERALD_TWITTER_CONSUMER_KEY: ${{ secrets.HERALD_TWITTER_CONSUMER_KEY }}
+          HERALD_TWITTER_CONSUMER_SECRET: ${{ secrets.HERALD_TWITTER_CONSUMER_SECRET }}
+          HERALD_TWITTER_ACCESS_TOKEN: ${{ secrets.HERALD_TWITTER_ACCESS_TOKEN }}
+          HERALD_TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.HERALD_TWITTER_ACCESS_TOKEN_SECRET }}
+          HERALD_REPOS: ${{ github.repository }}
+          HERALD_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          herald publish \
+            --content-type ${{ steps.content-type.outputs.type }} \
+            --days ${{ steps.content-type.outputs.days }} \
+            --embed-title "${{ github.event.release.tag_name || 'Weekly digest' }}"

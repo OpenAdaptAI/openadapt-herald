@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "herald-announce"
+version = "0.1.0"
+description = "LLM-powered social media announcements from your git history"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Richard Abrich", email = "richard@openadapt.ai" },
+]
+keywords = ["automation", "social-media", "discord", "twitter", "changelog", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "typer>=0.9.0",
+    "pydantic-settings>=2.0",
+    "discord-webhook>=1.3.0",
+    "tweepy>=4.14",
+    "anthropic>=0.30",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+consilium = [
+    "consilium",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+    "ruff>=0.1.0",
+]
+
+[tool.uv.sources]
+consilium = { path = "../consilium", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["herald"]
+
+[project.scripts]
+herald = "herald.cli:app"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
