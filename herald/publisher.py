@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from herald.config import HeraldSettings
 from herald.platforms.base import Publisher, PublishResult
 from herald.platforms.discord import DiscordPublisher
+from herald.platforms.linkedin import LinkedInPublisher
 from herald.platforms.twitter import TwitterPublisher
 
 
@@ -42,6 +43,11 @@ def get_publishers(settings: HeraldSettings) -> list[Publisher]:
             consumer_secret=settings.twitter_consumer_secret,
             access_token=settings.twitter_access_token,
             access_token_secret=settings.twitter_access_token_secret,
+        ))
+
+    if settings.has_linkedin:
+        publishers.append(LinkedInPublisher(
+            access_token=settings.linkedin_access_token,
         ))
 
     return publishers

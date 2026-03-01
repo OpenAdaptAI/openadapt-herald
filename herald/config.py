@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +20,17 @@ class HeraldSettings(BaseSettings):
 
     # LLM
     anthropic_api_key: str = ""
+
+    @model_validator(mode="after")
+    def _fallback_api_keys(self):
+        """Fall back to non-prefixed env vars for common API keys."""
+        if not self.anthropic_api_key:
+            self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not self.openai_api_key:
+            self.openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not self.github_token:
+            self.github_token = os.environ.get("GH_TOKEN", "")
+        return self
     openai_api_key: str = ""
     default_model: str = "claude-sonnet-4-20250514"
 
@@ -28,6 +42,9 @@ class HeraldSettings(BaseSettings):
     twitter_consumer_secret: str = ""
     twitter_access_token: str = ""
     twitter_access_token_secret: str = ""
+
+    # LinkedIn
+    linkedin_access_token: str = ""
 
     # GitHub
     github_token: str = ""
@@ -59,6 +76,10 @@ class HeraldSettings(BaseSettings):
             self.twitter_access_token,
             self.twitter_access_token_secret,
         ])
+
+    @property
+    def has_linkedin(self) -> bool:
+        return bool(self.linkedin_access_token)
 
     @property
     def has_anthropic(self) -> bool:

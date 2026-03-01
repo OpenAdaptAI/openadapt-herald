@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from herald.platforms.base import PublishResult
 from herald.platforms.discord import DiscordPublisher
+from herald.platforms.linkedin import LinkedInPublisher
 from herald.platforms.twitter import TwitterPublisher
 from herald.publisher import PublishReport, get_publishers, publish_content
 
@@ -138,6 +139,138 @@ class TestTwitterPublisher:
         assert "Rate limited" in result.message
 
 
+class TestLinkedInPublisher:
+    def test_is_configured_with_token(self):
+        pub = LinkedInPublisher("access-token-123")
+        assert pub.is_configured()
+
+    def test_is_configured_without_token(self):
+        pub = LinkedInPublisher("")
+        assert not pub.is_configured()
+
+    def test_platform_name(self):
+        pub = LinkedInPublisher("token")
+        assert pub.platform_name == "linkedin"
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_publish_success(self, mock_get, mock_post):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"sub": "abc123"}),
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            json=MagicMock(return_value={"id": "urn:li:share:67890"}),
+        )
+
+        pub = LinkedInPublisher("access-token-123")
+        result = pub.publish("Test LinkedIn post")
+
+        assert result.success
+        assert result.platform == "linkedin"
+        assert "67890" in result.url
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][0]
+        assert payload["author"] == "urn:li:person:abc123"
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_publish_truncates_long_content(self, mock_get, mock_post):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"sub": "abc123"}),
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            json=MagicMock(return_value={"id": "urn:li:share:67890"}),
+        )
+
+        pub = LinkedInPublisher("access-token-123")
+        long_content = "x" * 4000
+        pub.publish(long_content)
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs[1]["json"]
+        text = payload["specificContent"]["com.linkedin.ugc.ShareContent"][
+            "shareCommentary"
+        ]["text"]
+        assert len(text) == 3000
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_publish_handles_api_error(self, mock_get, mock_post):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"sub": "abc123"}),
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        mock_post.return_value = MagicMock(
+            status_code=403,
+            text="Forbidden",
+        )
+
+        pub = LinkedInPublisher("access-token-123")
+        result = pub.publish("Test")
+
+        assert not result.success
+        assert "403" in result.message
+
+    @patch("requests.get")
+    def test_publish_handles_network_error(self, mock_get):
+        mock_get.side_effect = ConnectionError("Network error")
+
+        pub = LinkedInPublisher("access-token-123")
+        result = pub.publish("Test")
+
+        assert not result.success
+        assert "Network error" in result.message
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_publish_custom_visibility(self, mock_get, mock_post):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"sub": "abc123"}),
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            json=MagicMock(return_value={"id": "urn:li:share:67890"}),
+        )
+
+        pub = LinkedInPublisher("access-token-123")
+        pub.publish("Test", visibility="CONNECTIONS")
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs[1]["json"]
+        assert (
+            payload["visibility"]["com.linkedin.ugc.MemberNetworkVisibility"]
+            == "CONNECTIONS"
+        )
+
+    @patch("requests.get")
+    def test_publish_handles_missing_sub(self, mock_get):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={}),
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        pub = LinkedInPublisher("access-token-123")
+        result = pub.publish("Test")
+
+        assert not result.success
+        assert "sub" in result.message
+
+
 class TestPublishReport:
     def test_all_success(self):
         report = PublishReport(results=[
@@ -180,6 +313,14 @@ class TestGetPublishers:
         )
         publishers = get_publishers(settings)
         assert any(p.platform_name == "twitter" for p in publishers)
+
+    def test_returns_linkedin_when_configured(self):
+        from herald.config import HeraldSettings
+        settings = HeraldSettings(
+            linkedin_access_token="li-token-123",
+        )
+        publishers = get_publishers(settings)
+        assert any(p.platform_name == "linkedin" for p in publishers)
 
     def test_returns_empty_when_nothing_configured(self):
         from herald.config import HeraldSettings

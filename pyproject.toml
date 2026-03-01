@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "Richard Abrich", email = "richard@openadapt.ai" },
 ]
-keywords = ["automation", "social-media", "discord", "twitter", "changelog", "llm"]
+keywords = ["automation", "social-media", "discord", "twitter", "linkedin", "changelog", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

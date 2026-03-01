@@ -217,6 +217,7 @@ def preview(
         content_type=content_type,
         model=model,
         project_context=project_context,
+        use_consilium=False,
     )
 
 

@@ -2,7 +2,7 @@
 
 LLM-powered social media announcements from your git history.
 
-Herald collects commits, releases, and merged PRs from your repos, runs them through an LLM with a human-writing-guide-aware prompt, and posts the result to Discord and Twitter/X.
+Herald collects commits, releases, and merged PRs from your repos, runs them through an LLM with a human-writing-guide-aware prompt, and posts the result to Discord, Twitter/X, and LinkedIn.
 
 ## Quick start
 
@@ -27,13 +27,13 @@ herald publish --repos owner/repo --content-type release
 Collect          Compose           Publish
 git log    ──►   LLM generates  ──►  Discord webhook
 gh releases      platform-specific    Twitter API
-gh pr list       content with         (extensible)
-                 writing guide
+gh pr list       content with         LinkedIn API
+                 writing guide        (extensible)
 ```
 
 1. **Collect** gathers artifacts from git history and GitHub API (commits, releases, merged PRs)
 2. **Compose** feeds artifacts to an LLM with a writing guide that avoids AI-sounding language (no "delve," no "leverage," varied sentence length, contractions)
-3. **Publish** posts platform-specific content to Discord (via webhook) and Twitter/X (via API v2)
+3. **Publish** posts platform-specific content to Discord (via webhook), Twitter/X (via API v2), and LinkedIn (via UGC Posts API)
 
 ## Content types
 
@@ -62,11 +62,23 @@ All settings are configurable via environment variables with `HERALD_` prefix:
 | `HERALD_TWITTER_CONSUMER_SECRET` | Twitter API consumer secret |
 | `HERALD_TWITTER_ACCESS_TOKEN` | Twitter API access token |
 | `HERALD_TWITTER_ACCESS_TOKEN_SECRET` | Twitter API access token secret |
+| `HERALD_LINKEDIN_ACCESS_TOKEN` | LinkedIn OAuth2 access token (`w_member_social` scope) |
 | `HERALD_GITHUB_TOKEN` | GitHub token for API access |
 | `HERALD_REPOS` | Comma-separated repos (`owner/repo` or local paths) |
 | `HERALD_DEFAULT_MODEL` | LLM model (default: `claude-sonnet-4-20250514`) |
 | `HERALD_LOOKBACK_DAYS` | Default lookback period (default: 7) |
 | `HERALD_DRY_RUN` | Set to `true` for preview-only mode |
+
+## LinkedIn setup
+
+To post to LinkedIn, you need an OAuth2 access token with the `w_member_social` scope:
+
+1. Create an app at [LinkedIn Developer Portal](https://www.linkedin.com/developers/apps)
+2. Under **Products**, request access to **Share on LinkedIn** (grants `w_member_social`)
+3. Generate an OAuth2 access token using the 3-legged OAuth flow or the Developer Portal token generator
+4. Set `HERALD_LINKEDIN_ACCESS_TOKEN` in your `.env` file
+
+Note: LinkedIn access tokens typically expire after 60 days. For long-lived automation, implement a token refresh flow or use a long-lived token from a LinkedIn app with appropriate permissions.
 
 ## GitHub Actions
 
