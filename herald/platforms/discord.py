@@ -30,7 +30,7 @@ class DiscordPublisher(Publisher):
 
         username = kwargs.get("username", "Herald")
         embed_title = kwargs.get("embed_title")
-        embed_color = kwargs.get("embed_color", "2105893")
+        embed_color = kwargs.get("embed_color", 2105893)
 
         webhook = DiscordWebhook(url=self._webhook_url, username=username)
 
