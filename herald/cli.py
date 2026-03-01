@@ -118,6 +118,7 @@ def publish(
         "", help="Comma-separated platforms to publish to (default: all)"
     ),
     embed_title: str = typer.Option("", help="Title for Discord embeds"),
+    username: str = typer.Option("", help="Display name for bot posts"),
     dry_run: bool = typer.Option(False, help="Preview without posting"),
     use_consilium: bool = typer.Option(False, help="Use consilium multi-model council"),
 ):
@@ -193,6 +194,7 @@ def publish(
         publishers,
         dry_run=is_dry,
         embed_title=embed_title,
+        username=username,
     )
 
     console.print("\n[bold]Publish results:[/bold]")

@@ -58,6 +58,7 @@ def publish_content(
     publishers: list[Publisher],
     dry_run: bool = False,
     embed_title: str = "",
+    username: str = "",
 ) -> PublishReport:
     """Publish composed content to all configured platforms.
 
@@ -96,6 +97,8 @@ def publish_content(
             continue
 
         kwargs = {}
+        if username:
+            kwargs["username"] = username
         if platform == "discord" and embed_title:
             kwargs["embed_title"] = embed_title
 

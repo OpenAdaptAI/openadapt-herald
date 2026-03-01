@@ -324,7 +324,16 @@ class TestGetPublishers:
 
     def test_returns_empty_when_nothing_configured(self):
         from herald.config import HeraldSettings
-        settings = HeraldSettings()
+
+        settings = HeraldSettings(
+            _env_file=None,
+            discord_webhook_url="",
+            twitter_consumer_key="",
+            twitter_consumer_secret="",
+            twitter_access_token="",
+            twitter_access_token_secret="",
+            linkedin_access_token="",
+        )
         publishers = get_publishers(settings)
         assert publishers == []
 
