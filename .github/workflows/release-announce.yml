@@ -1,18 +1,17 @@
-name: announce
+name: weekly-digest
 
-# Example workflow: announce releases to Discord and Twitter.
-# Copy this into your project's .github/workflows/ and configure secrets.
+# Publishes weekly digest and on-demand announcements to Discord.
 #
 # Required secrets:
-#   HERALD_ANTHROPIC_API_KEY - for LLM content generation
-#   HERALD_DISCORD_WEBHOOK_URL - for Discord posting
+#   HERALD_ANTHROPIC_API_KEY   - Anthropic API key for LLM content generation
+#   HERALD_DISCORD_WEBHOOK_URL - Discord webhook URL for posting
+#
+# Optional secrets:
 #   HERALD_TWITTER_CONSUMER_KEY, HERALD_TWITTER_CONSUMER_SECRET,
-#   HERALD_TWITTER_ACCESS_TOKEN, HERALD_TWITTER_ACCESS_TOKEN_SECRET - for Twitter
+#   HERALD_TWITTER_ACCESS_TOKEN, HERALD_TWITTER_ACCESS_TOKEN_SECRET
+#   HERALD_LINKEDIN_ACCESS_TOKEN
 
 on:
-  release:
-    types: [published]
-
   # Weekly digest every Monday at 3pm UTC
   schedule:
     - cron: "0 15 * * 1"
@@ -22,12 +21,22 @@ on:
       content_type:
         description: "Content type"
         required: false
-        default: "release"
+        default: "digest"
         type: choice
         options:
-          - release
           - digest
+          - release
           - spotlight
+      days:
+        description: "Look back N days"
+        required: false
+        default: "7"
+        type: string
+      dry_run:
+        description: "Dry run (preview only)"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   announce:
@@ -38,21 +47,18 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Install herald
-        run: uv pip install herald-announce
+      - name: Install herald from repo
+        run: uv sync
 
       - name: Determine content type
-        id: content-type
+        id: params
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "type=digest" >> $GITHUB_OUTPUT
             echo "days=7" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "type=${{ inputs.content_type }}" >> $GITHUB_OUTPUT
-            echo "days=7" >> $GITHUB_OUTPUT
           else
-            echo "type=release" >> $GITHUB_OUTPUT
-            echo "days=1" >> $GITHUB_OUTPUT
+            echo "type=${{ inputs.content_type }}" >> $GITHUB_OUTPUT
+            echo "days=${{ inputs.days }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish announcements
@@ -63,10 +69,12 @@ jobs:
           HERALD_TWITTER_CONSUMER_SECRET: ${{ secrets.HERALD_TWITTER_CONSUMER_SECRET }}
           HERALD_TWITTER_ACCESS_TOKEN: ${{ secrets.HERALD_TWITTER_ACCESS_TOKEN }}
           HERALD_TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.HERALD_TWITTER_ACCESS_TOKEN_SECRET }}
-          HERALD_REPOS: ${{ github.repository }}
+          HERALD_LINKEDIN_ACCESS_TOKEN: ${{ secrets.HERALD_LINKEDIN_ACCESS_TOKEN }}
+          HERALD_REPOS: "OpenAdaptAI/OpenAdapt,OpenAdaptAI/openadapt-evals,OpenAdaptAI/openadapt-ml"
           HERALD_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          herald publish \
-            --content-type ${{ steps.content-type.outputs.type }} \
-            --days ${{ steps.content-type.outputs.days }} \
-            --embed-title "${{ github.event.release.tag_name || 'Weekly digest' }}"
+          uv run herald publish \
+            --content-type ${{ steps.params.outputs.type }} \
+            --days ${{ steps.params.outputs.days }} \
+            --embed-title "Weekly Digest" \
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}
