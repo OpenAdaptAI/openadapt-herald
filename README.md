@@ -89,7 +89,7 @@ See `.github/workflows/release-announce.yml` for a ready-to-use workflow that:
 
 ## Multi-model quality (optional)
 
-Herald can use [consilium](https://github.com/abrichr/consilium) for multi-model consensus on important posts:
+Herald can use [consilium](https://github.com/OpenAdaptAI/openadapt-consilium) for multi-model consensus on important posts:
 
 ```bash
 pip install herald-announce[consilium]
