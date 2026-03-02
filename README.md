@@ -111,8 +111,8 @@ The guide is based on AI detection research from PNAS, ACL, and Wikipedia's "Sig
 ## Development
 
 ```bash
-git clone https://github.com/abrichr/herald.git
-cd herald
+git clone https://github.com/OpenAdaptAI/openadapt-herald.git
+cd openadapt-herald
 uv sync --extra dev
 uv run pytest -v
 uv run ruff check .
