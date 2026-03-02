@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "LLM-powered social media announcements from your git history"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
     { name = "Richard Abrich", email = "richard@openadapt.ai" },
 ]
