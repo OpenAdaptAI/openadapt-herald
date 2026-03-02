@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -20,13 +20,15 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv pip install --system ".[dev]"
+        run: uv sync --extra dev --no-sources
 
       - name: Lint
-        run: ruff check .
+        run: uv run --no-sources ruff check .
 
       - name: Test
-        run: pytest -v
+        run: uv run --no-sources pytest -v

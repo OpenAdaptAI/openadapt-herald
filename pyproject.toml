@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "LLM-powered social media announcements from your git history"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Richard Abrich", email = "richard@openadapt.ai" },
 ]
@@ -44,7 +44,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-consilium = { path = "../consilium", editable = true }
+consilium = { path = "../openadapt-consilium", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["herald"]
