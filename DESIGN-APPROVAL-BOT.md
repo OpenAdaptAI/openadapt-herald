@@ -110,7 +110,7 @@ Create `crier` as a standalone project that:
 1. Follows the consilium/herald pattern (small, focused, reusable)
 2. Uses herald as a library dependency for compose/publish
 3. Owns the event-listening and Telegram approval UX
-4. Stays in the same monorepo (`/Users/abrichr/oa/src/crier`)
+4. Stays in the same monorepo (`openadapt-crier/`)
 
 This is the right boundary because:
 - Herald's job is "turn artifacts into social media posts" — it does this well
@@ -630,7 +630,7 @@ herald-announce = { path = "../openadapt-herald", editable = true }
 
 ## Relationship to PLAN-generalized-dev-automation.md
 
-The dev automation plan (`/Users/abrichr/oa/src/PLAN-generalized-dev-automation.md`)
+The dev automation plan (the generalized dev automation plan)
 describes a generalized Ralph Loop worker that generates PRs via Claude Agent SDK.
 That plan also includes a Telegram bot for approving dev tasks.
 
