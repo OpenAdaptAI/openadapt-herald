@@ -4,6 +4,8 @@ LLM-powered social media announcements from your git history.
 
 Herald collects commits, releases, and merged PRs from your repos, runs them through an LLM with a human-writing-guide-aware prompt, and posts the result to Discord, Twitter/X, and LinkedIn.
 
+> **Looking for auto-generated status presentations?** See [openadapt-presenter](https://github.com/OpenAdaptAI/openadapt-presenter) -- it reuses herald's collector and adds Playwright screen captures, LLM slide composition, and Marp/PowerPoint rendering. Record your E2E tests, get a deck.
+
 ## Quick start
 
 ```bash

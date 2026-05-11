@@ -13,3 +13,7 @@ venv/
 .ruff_cache/
 *.log
 .DS_Store
+
+# Editor swap files
+*.swp
+*.swo
