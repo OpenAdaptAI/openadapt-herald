@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from herald.collector import (
@@ -14,6 +15,17 @@ from herald.collector import (
     collect_github_prs,
     collect_github_releases,
 )
+
+
+def _iso_days_ago(days: float) -> str:
+    """A GitHub-style UTC timestamp `days` before now.
+
+    The collectors filter by a window relative to `datetime.now`, so fixtures
+    that must fall inside (or outside) that window have to be computed relative
+    to now too. A hardcoded literal only stays inside a 7-day window for 7 days.
+    """
+    moment = datetime.now(timezone.utc) - timedelta(days=days)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class TestCommitCollection:
@@ -68,7 +80,10 @@ class TestGitHubReleases:
     def test_collect_releases_parses_output(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="v1.0.0|Release 1.0|Bug fixes and improvements|2026-02-28T12:00:00Z\n",
+            stdout=(
+                "v1.0.0|Release 1.0|Bug fixes and improvements"
+                f"|{_iso_days_ago(1)}\n"
+            ),
         )
         result = collect_github_releases("owner/repo", since_days=7)
         assert len(result) == 1
@@ -107,7 +122,7 @@ class TestGitHubPRs:
                 "number": 42,
                 "title": "feat: add auth",
                 "body": "Added authentication",
-                "mergedAt": "2026-02-28T10:00:00Z",
+                "mergedAt": _iso_days_ago(1),
                 "author": {"login": "alice"},
             }
         ]
