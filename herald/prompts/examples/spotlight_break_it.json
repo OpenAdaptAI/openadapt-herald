@@ -1,0 +1,5 @@
+{
+  "discord": "`openadapt quickstart --break-it` is the two-minute proof.\n\nOpenAdapt compiles a demonstrated GUI task into a program that reports VERIFIED only if an independent check agrees. Recording authors. Receipt proves. Program is the company.\n\n`--break-it` reruns the same certified MockMed bundle against a backend that paints a success banner and then rejects the write. Every on-screen check still passes. The independent read of the system of record doesn't. The engine HALTs at the consequential step. Evidence lands in a local `run-broken/REPORT.md`. There's no shareable receipt, because that rail is reserved for VERIFIED runs.\n\n```bash\npip install openadapt\nopenadapt quickstart\nopenadapt quickstart --break-it\n```\n\nI expected the banner to be enough. It wasn't.",
+  "twitter": "openadapt quickstart --break-it reruns a certified program against a backend that paints success and drops the write. The independent check refuses VERIFIED.",
+  "summary": "Independent check rejects a fake success banner: openadapt quickstart --break-it."
+}

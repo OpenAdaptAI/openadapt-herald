@@ -1,22 +1,29 @@
 # herald
 
+Herald is internal social-copy tooling. It is not the OpenAdapt product.
+
 > [!IMPORTANT]
-> **Status: Internal tooling — not the product.** Herald is release-announcement
-> automation used by the OpenAdapt team. It is not part of the OpenAdapt product
-> and is not required by any OpenAdapt package.
+> **Status: Internal tooling — not the product.** Herald drafts and posts
+> release copy for the OpenAdapt team. It is dormant: it does not post on
+> every commit, and it is not required by any OpenAdapt package.
 >
-> The OpenAdapt product is the demonstration compiler,
-> [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow), installed
-> via the [`OpenAdapt`](https://github.com/OpenAdaptAI/OpenAdapt) launcher
-> (`pip install openadapt`): it compiles a demonstrated GUI workflow into a
-> deterministic, locally executable program. Healthy runs make no model calls,
-> and it halts instead of guessing when verification fails. Lifecycle labels for
-> every repository are in the
+> OpenAdapt compiles a demonstrated GUI task into a program that reports
+> VERIFIED only if an independent check agrees. Recording authors. Receipt
+> proves. Program is the company. Install via the
+> [`OpenAdapt`](https://github.com/OpenAdaptAI/OpenAdapt) launcher
+> (`pip install openadapt`); the engine is
+> [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow).
+> Lifecycle labels for every repository are in the
 > [repository lifecycle registry](https://github.com/OpenAdaptAI/.github/blob/main/REPOSITORY_LIFECYCLE.md).
 
-LLM-powered social media announcements from your git history.
+If someone publishes a release digest, Herald's composer prompts use that
+product noun. Composer copy never calls OpenAdapt generative RPA, an LMM
+adapter, AI-first, verified last-mile as the product name, or something that
+"learns by observing."
 
-Herald collects commits, releases, and merged PRs from your repos, runs them through an LLM with a human-writing-guide-aware prompt, and posts the result to Discord, Twitter/X, and LinkedIn.
+Herald can collect commits, releases, and merged PRs, fill a writing-guide-aware
+prompt, and post to Discord, Twitter/X, and LinkedIn. That publish path still
+calls Anthropic. It is opt-in, not a commit bot.
 
 ## Quick start
 
@@ -28,12 +35,19 @@ pip install herald-announce
 cp .env.example .env
 # Edit .env with your API keys
 
-# Preview what would be posted
+# Preview a product-correct spotlight. No Anthropic key.
+herald compose --template --content-type spotlight
+
+# Preview from git history (needs Anthropic unless --template)
 herald preview --repos owner/repo --days 7
 
 # Actually post to configured platforms
 herald publish --repos owner/repo --content-type release
 ```
+
+`--template` fills canned copy. The spotlight template is `openadapt quickstart --break-it`: an independent check rejects a fake success banner. `herald publish --template --dry-run` shows that copy without posting and without calling Anthropic.
+
+LLM `compose` / `publish` still needs `HERALD_ANTHROPIC_API_KEY`. The free draft path is [Crier](https://github.com/OpenAdaptAI/openadapt-crier) plus `oa-social`. Use that when you want a draft and you don't want to pay for a composer call.
 
 ## How it works
 
@@ -51,17 +65,19 @@ gh pr list       content with         LinkedIn API
 
 ## Content types
 
-- `release` — Announce a specific release. Best triggered on GitHub Release events.
-- `digest` — Weekly roundup across repos. Best on a cron schedule.
-- `spotlight` — Deep dive on a single feature. Best triggered manually.
+- `release` — Announce a specific release. On-demand, not every commit.
+- `digest` — Weekly roundup across repos. On-demand.
+- `spotlight` — Deep dive on a single feature. The shipped example is `--break-it`.
 
 ## CLI commands
 
 ```bash
 herald collect   # Gather and display artifacts
 herald compose   # Generate content (no posting)
+herald compose --template --content-type spotlight  # canned --break-it copy, no LLM
 herald preview   # Alias for compose
 herald publish   # Full pipeline: collect → compose → post
+herald publish --template --dry-run --content-type spotlight
 ```
 
 ## Configuration
@@ -96,10 +112,8 @@ Note: LinkedIn access tokens typically expire after 60 days. For long-lived auto
 
 ## GitHub Actions
 
-See `.github/workflows/release-announce.yml` for a ready-to-use workflow that:
-- Posts release announcements when a GitHub Release is published
-- Posts weekly digests every Monday
-- Supports manual triggers with content type selection
+See `.github/workflows/release-announce.yml` for a workflow that can post a
+digest on demand. Herald is dormant. Do not wire it to post on every commit.
 
 ## Multi-model quality (optional)
 
@@ -114,11 +128,13 @@ This queries multiple LLMs, has them cross-review each other's drafts, and synth
 
 ## Writing guide
 
-Herald embeds a writing guide that steers the LLM away from AI-sounding patterns:
-- Bans 60+ overused AI words ("delve," "landscape," "leverage")
-- Enforces varied sentence length and contractions
-- Avoids mechanical transitions and rule-of-three patterns
-- Encourages concrete specifics over vague generalities
+`herald/prompts/writing_guide.md` is an embedded copy of the workspace
+WRITING_GUIDE. Do not invent a second guide. The composer must:
+
+- Use contractions
+- Use no em-dash clusters (zero in tweets)
+- Use no banned words
+- Never write "it's not X, it's Y"
 
 The guide is based on AI detection research from PNAS, ACL, and Wikipedia's "Signs of AI Writing."
 

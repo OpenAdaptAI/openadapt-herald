@@ -13,6 +13,13 @@ from herald.collector import Artifacts
 ContentType = Literal["release", "digest", "spotlight", "introduction"]
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+_EXAMPLES_DIR = _PROMPTS_DIR / "examples"
+
+PRODUCT_NOUN = (
+    "OpenAdapt compiles a demonstrated GUI task into a program that reports "
+    "VERIFIED only if an independent check agrees. Recording authors. "
+    "Receipt proves. Program is the company."
+)
 
 
 def _load_prompt(name: str) -> str:
@@ -27,13 +34,24 @@ def _load_writing_guide() -> str:
     return path.read_text()
 
 
+def _load_example(name: str) -> dict:
+    """Load a canned JSON example. No LLM call."""
+    path = _EXAMPLES_DIR / f"{name}.json"
+    return json.loads(path.read_text())
+
+
 def _build_system_prompt(content_type: ContentType, project_context: str = "") -> str:
     """Build the full system prompt with writing guide and content-type instructions."""
     writing_guide = _load_writing_guide()
     content_instructions = _load_prompt(content_type)
+    product = _load_prompt("product")
 
     parts = [
-        "You are a developer advocate writing social media content for an open-source project.",
+        "You write social copy for OpenAdapt. Herald is internal tooling, not the product.",
+        "",
+        "## Product noun",
+        "",
+        product,
         "",
         "## Writing style guide",
         "Follow this guide strictly. Your output MUST sound human, not AI-generated.",
@@ -163,3 +181,32 @@ def compose_with_consilium(
             "twitter": text[:280] if len(text) > 280 else text,
             "summary": text[:200] if len(text) > 200 else text,
         }
+
+
+def compose_from_template(
+    artifacts_list: list[Artifacts] | None = None,
+    content_type: ContentType = "spotlight",
+    extra_instructions: str = "",
+) -> dict:
+    """Fill a product-correct template. No Anthropic call.
+
+    Spotlight always uses the `--break-it` example: an independent check
+    rejects a fake success banner. Other content types lead with the product
+    noun and list whatever artifacts were collected.
+    """
+    extra = extra_instructions.lower()
+    if content_type == "spotlight" or "break-it" in extra:
+        return _load_example("spotlight_break_it")
+
+    artifacts_list = artifacts_list or []
+    shipped = _format_artifacts_for_prompt(artifacts_list)
+    body = f"{PRODUCT_NOUN}\n\n{shipped}".strip()
+    twitter = (
+        "OpenAdapt compiles a demonstrated GUI task into a program that "
+        "reports VERIFIED only if an independent check agrees."
+    )
+    return {
+        "discord": body,
+        "twitter": twitter,
+        "summary": PRODUCT_NOUN,
+    }

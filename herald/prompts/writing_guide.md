@@ -1,3 +1,15 @@
+<!--
+Embedded copy of the workspace WRITING_GUIDE constraints for LLM composition.
+Canonical source: workspace WRITING_GUIDE.md (beside AGENTS.md / CLAUDE.md).
+Do not invent extra rules here. If they conflict, the workspace copy wins.
+
+Composer extract of the four mechanical checks:
+- Contractions: use them (don't, can't, it's). Zero contractions reads as machine output.
+- No em-dash clusters. Maximum one em dash per three paragraphs. Zero in tweets and other short copy.
+- No banned words (see the taxonomy).
+- No "it's not X, it's Y" framing. State the claim and support it.
+-->
+
 # Writing That Doesn't Sound Like an LLM
 
 A project-agnostic reference. Based on AI detection research, Wikipedia's "Signs of AI Writing" page, and practical discussion from 2024-2026. Updated July 2026 with a full taxonomy: for each tell, what it is, why models produce it, how to detect it, and the prompt instruction that actually suppresses it.
@@ -169,6 +181,38 @@ Five families. Each entry: the tell, why it happens, how to detect it, and the p
 - Counter: "Start inside the story: first sentence states a specific fact, number, or event unique to this piece. No scene-setting about the industry, the era, or the world."
 
 ---
+
+## Cold email tells
+
+AI-written sales email has its own recognizable shapes now. 61% of recipients
+claim they can spot it, and the tells below are what they're spotting.
+
+1. The mail-merge opener: "Hi {Name} — I noticed you {observation about their
+   website}." The em dash after the name, then a compliment or observation
+   that proves you ran a scraper. If you know something about their business,
+   say it the way a colleague would: as shared knowledge, mid-thought, in
+   natural word order. "Your team runs benefit checks the 271 never returns
+   complete" beats "I noticed you offer verification of benefits services."
+2. Batch parallelism. One AI email is hard to spot; thirty with identical
+   sentence skeletons and a swapped noun are not. Burstiness applies across a
+   campaign, not just inside one email. Vary the first sentence's grammatical
+   shape from email to email. If every message could be diffed against the
+   template and only the merge fields change, rewrite until that's false.
+3. "Quick question" subjects, "Hope this finds you well," "I'll keep this
+   brief" (then not being brief), "Does this resonate?", "Worth a chat?"
+4. The contrast frame: "It's not about X — it's about Y." "We don't just
+   automate; we verify." One of these can land. As a habit it's a signature.
+5. Performative brevity: "No fluff." "Straight to the point." Saying it is
+   the opposite of doing it.
+6. The flattery bridge: "Impressive work on..." followed by a pivot to the
+   pitch. Everyone knows the compliment was generated. If you can't praise
+   something specific enough to survive a follow-up question on a call,
+   don't praise at all.
+7. Colons in subject lines and headline-ese ("Cut denials: a new approach").
+   Humans writing to one person don't headline.
+
+The test for an outreach email: could the recipient forward it to a colleague
+with "do we know this guy?" and have the colleague answer "sounds like it."
 
 ## Pre-publish checklist
 

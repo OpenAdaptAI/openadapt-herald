@@ -7,11 +7,14 @@ import pytest
 
 from herald.collector import Artifacts, Commit, Release
 from herald.composer import (
+    PRODUCT_NOUN,
     _build_system_prompt,
     _format_artifacts_for_prompt,
+    _load_example,
     _load_prompt,
     _load_writing_guide,
     compose,
+    compose_from_template,
 )
 
 
@@ -34,6 +37,33 @@ class TestPromptLoading:
     def test_load_spotlight_prompt(self):
         prompt = _load_prompt("spotlight")
         assert "spotlight" in prompt.lower() or "feature" in prompt.lower()
+        assert "--break-it" in prompt
+        assert "success banner" in prompt
+        assert "independent" in prompt.lower()
+
+    def test_load_product_prompt_kills_dual_vocabulary(self):
+        prompt = _load_prompt("product")
+        assert "VERIFIED" in prompt
+        assert "independent check" in prompt
+        assert "Do not describe OpenAdapt as any of these" in prompt
+        for phrase in (
+            "generative RPA",
+            "LMM adapter",
+            "AI-first",
+            "verified last-mile",
+            "learns by observing",
+        ):
+            assert phrase in prompt
+
+    def test_writing_guide_points_at_canonical_copy(self):
+        guide = _load_writing_guide()
+        assert "workspace WRITING_GUIDE" in guide
+        assert "do not invent extra rules" in guide.lower()
+        assert "contractions" in guide.lower()
+        assert "em dash" in guide.lower() or "em-dash" in guide.lower()
+        assert "it's not X, it's Y" in guide
+        assert "Cold email tells" in guide
+        assert "delve" in guide
 
     def test_load_nonexistent_prompt_raises(self):
         with pytest.raises(FileNotFoundError):
@@ -45,6 +75,13 @@ class TestSystemPrompt:
         prompt = _build_system_prompt("release")
         assert "delve" in prompt  # banned word from writing guide
         assert "writing style guide" in prompt.lower()
+
+    def test_build_system_prompt_includes_product_noun(self):
+        prompt = _build_system_prompt("digest")
+        assert "independent check" in prompt
+        assert "Program is the company" in prompt
+        assert "generative RPA" in prompt
+        assert "learns by observing" in prompt
 
     def test_build_system_prompt_includes_content_instructions(self):
         prompt = _build_system_prompt("release")
@@ -181,3 +218,31 @@ class TestCompose:
 
         call_args = mock_client.messages.create.call_args
         assert call_args[1]["model"] == "claude-opus-4-6"
+
+
+class TestComposeFromTemplate:
+    def test_spotlight_is_break_it_without_anthropic(self):
+        with patch("herald.composer.anthropic.Anthropic") as mock_anthropic:
+            result = compose_from_template([], content_type="spotlight")
+        mock_anthropic.assert_not_called()
+        assert "--break-it" in result["discord"]
+        assert "success banner" in result["discord"]
+        assert "independent" in result["discord"].lower()
+        assert "VERIFIED" in result["twitter"]
+        assert len(result["twitter"]) <= 280
+        assert "fake success banner" in result["summary"]
+
+    def test_spotlight_example_file_matches_loader(self):
+        loaded = _load_example("spotlight_break_it")
+        result = compose_from_template(content_type="spotlight")
+        assert result == loaded
+
+    def test_release_template_leads_with_product_noun(self):
+        artifacts = [Artifacts(
+            repo_name="OpenAdaptAI/openadapt-flow",
+            releases=[Release("v1.34.0", "1.34.0", "Halt on lie", "2026-08-29")],
+        )]
+        result = compose_from_template(artifacts, content_type="release")
+        assert result["summary"] == PRODUCT_NOUN
+        assert "v1.34.0" in result["discord"]
+        assert "independent check" in result["twitter"]

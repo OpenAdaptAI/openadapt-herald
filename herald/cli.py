@@ -8,7 +8,7 @@ from rich.panel import Panel
 
 app = typer.Typer(
     name="herald",
-    help="LLM-powered social media announcements from your git history.",
+    help="Internal social-copy tooling. Not the OpenAdapt product.",
     no_args_is_help=True,
 )
 console = Console()
@@ -17,6 +17,39 @@ console = Console()
 def _get_settings(**overrides):
     from herald.config import get_settings
     return get_settings(**overrides)
+
+
+def _compose_payload(
+    artifacts_list,
+    *,
+    content_type: str,
+    project_context: str,
+    template: bool,
+    use_consilium: bool,
+    api_key: str,
+    model: str,
+):
+    from herald.composer import compose as compose_content
+    from herald.composer import compose_from_template, compose_with_consilium
+
+    if template:
+        return compose_from_template(
+            artifacts_list,
+            content_type=content_type,
+        )
+    if use_consilium:
+        return compose_with_consilium(
+            artifacts_list,
+            content_type=content_type,
+            project_context=project_context,
+        )
+    return compose_content(
+        artifacts_list,
+        content_type=content_type,
+        api_key=api_key,
+        model=model,
+        project_context=project_context,
+    )
 
 
 @app.command()
@@ -63,45 +96,46 @@ def compose(
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),
     use_consilium: bool = typer.Option(False, help="Use consilium multi-model council"),
+    template: bool = typer.Option(
+        False,
+        "--template",
+        help="Fill a product-correct template. No Anthropic call.",
+    ),
 ):
     """Compose social media content from collected artifacts."""
     from herald.collector import collect_all
-    from herald.composer import compose as compose_content
-    from herald.composer import compose_with_consilium
 
     settings = _get_settings()
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
-    if not repo_list:
-        console.print("[red]No repos configured.[/red]")
-        raise typer.Exit(1)
+    # Spotlight --template is the canned --break-it example. No repos, no LLM.
+    if template and content_type == "spotlight" and not repo_list:
+        artifacts_list = []
+    else:
+        if not repo_list:
+            console.print("[red]No repos configured.[/red]")
+            raise typer.Exit(1)
 
-    artifacts_list = collect_all(
-        repo_list,
-        since_days=days,
-        github_token=settings.github_token,
-    )
+        artifacts_list = collect_all(
+            repo_list,
+            since_days=days,
+            github_token=settings.github_token,
+        )
 
-    if not artifacts_list:
-        console.print("[yellow]No artifacts found.[/yellow]")
-        raise typer.Exit(0)
+        if not artifacts_list and not template:
+            console.print("[yellow]No artifacts found.[/yellow]")
+            raise typer.Exit(0)
 
     console.print("[dim]Composing content...[/dim]")
-
-    if use_consilium or settings.use_consilium:
-        content = compose_with_consilium(
-            artifacts_list,
-            content_type=content_type,
-            project_context=project_context,
-        )
-    else:
-        content = compose_content(
-            artifacts_list,
-            content_type=content_type,
-            api_key=settings.anthropic_api_key,
-            model=model or settings.default_model,
-            project_context=project_context,
-        )
+    content = _compose_payload(
+        artifacts_list,
+        content_type=content_type,
+        project_context=project_context,
+        template=template,
+        use_consilium=use_consilium or settings.use_consilium,
+        api_key=settings.anthropic_api_key,
+        model=model or settings.default_model,
+    )
 
     for platform, text in content.items():
         console.print(Panel(str(text), title=f"[bold]{platform}[/bold]"))
@@ -121,54 +155,56 @@ def publish(
     username: str = typer.Option("", help="Display name for bot posts"),
     dry_run: bool = typer.Option(False, help="Preview without posting"),
     use_consilium: bool = typer.Option(False, help="Use consilium multi-model council"),
+    template: bool = typer.Option(
+        False,
+        "--template",
+        help="Fill a product-correct template. No Anthropic call.",
+    ),
 ):
     """Collect, compose, and publish in one step."""
     from herald.collector import collect_all
-    from herald.composer import compose as compose_content
-    from herald.composer import compose_with_consilium
     from herald.publisher import get_publishers, publish_content
 
     settings = _get_settings()
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
-    if not repo_list:
-        console.print("[red]No repos configured.[/red]")
-        raise typer.Exit(1)
+    if template and content_type == "spotlight" and not repo_list:
+        artifacts_list = []
+        total = 0
+    else:
+        if not repo_list:
+            console.print("[red]No repos configured.[/red]")
+            raise typer.Exit(1)
 
-    # Collect
-    console.print("[dim]Collecting artifacts...[/dim]")
-    artifacts_list = collect_all(
-        repo_list,
-        since_days=days,
-        github_token=settings.github_token,
-    )
+        # Collect
+        console.print("[dim]Collecting artifacts...[/dim]")
+        artifacts_list = collect_all(
+            repo_list,
+            since_days=days,
+            github_token=settings.github_token,
+        )
 
-    if not artifacts_list:
-        console.print("[yellow]No artifacts found. Nothing to publish.[/yellow]")
-        raise typer.Exit(0)
+        if not artifacts_list and not template:
+            console.print("[yellow]No artifacts found. Nothing to publish.[/yellow]")
+            raise typer.Exit(0)
 
-    total = sum(
-        len(a.commits) + len(a.releases) + len(a.pull_requests)
-        for a in artifacts_list
-    )
-    console.print(f"[green]Found {total} artifacts.[/green]")
+        total = sum(
+            len(a.commits) + len(a.releases) + len(a.pull_requests)
+            for a in artifacts_list
+        )
+        console.print(f"[green]Found {total} artifacts.[/green]")
 
     # Compose
     console.print("[dim]Composing content...[/dim]")
-    if use_consilium or settings.use_consilium:
-        content = compose_with_consilium(
-            artifacts_list,
-            content_type=content_type,
-            project_context=project_context,
-        )
-    else:
-        content = compose_content(
-            artifacts_list,
-            content_type=content_type,
-            api_key=settings.anthropic_api_key,
-            model=model or settings.default_model,
-            project_context=project_context,
-        )
+    content = _compose_payload(
+        artifacts_list,
+        content_type=content_type,
+        project_context=project_context,
+        template=template,
+        use_consilium=use_consilium or settings.use_consilium,
+        api_key=settings.anthropic_api_key,
+        model=model or settings.default_model,
+    )
 
     # Preview
     for platform, text in content.items():
@@ -211,8 +247,13 @@ def preview(
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),
+    template: bool = typer.Option(
+        False,
+        "--template",
+        help="Fill a product-correct template. No Anthropic call.",
+    ),
 ):
-    """Shortcut for compose — shows content without publishing."""
+    """Shortcut for compose. Shows content without publishing."""
     compose(
         repos=repos,
         days=days,
@@ -220,6 +261,7 @@ def preview(
         model=model,
         project_context=project_context,
         use_consilium=False,
+        template=template,
     )
 
 
