@@ -62,7 +62,56 @@ herald collect   # Gather and display artifacts
 herald compose   # Generate content (no posting)
 herald preview   # Alias for compose
 herald publish   # Full pipeline: collect → compose → post
+herald post      # Post an approved file exactly as written (no model call)
 ```
+
+## Post an approved file exactly as written
+
+`herald post` is for text a person has already reviewed. It doesn't call a
+model, and it never shortens or rewrites the text. If the text is too long,
+it refuses and tells you by how much.
+
+```bash
+herald post --file approved.txt --platform x \
+  --ledger post-ledger.jsonl \
+  --expect-sha256 <hash of the approved text> \
+  --precheck-timeline
+```
+
+What it checks before it sends anything:
+
+- The SHA-256 of the file matches `--expect-sha256`, so an edit after
+  approval stops the post.
+- The text fits X's 280 weighted characters. X counts every link as 23
+  characters and most CJK characters and emoji as 2. Herald counts the same
+  way and leans long when it can't tell whether X will treat a word as a link.
+- The ledger has no record that this exact text was already posted.
+
+Every run ends in one of three results, with its own exit code:
+
+| Result | Exit code | What it means |
+|---|---|---|
+| `published` | 0 | X returned the new post's id. It's in the ledger. |
+| `not_sent` | 3 | Nothing was posted. Either the request never left this machine, or X refused it. |
+| `uncertain` | 4 | The request may have reached X, and Herald can't tell whether a post exists. |
+
+After an `uncertain` result, Herald doesn't retry on its own. The next run
+reads the account's 20 most recent posts first. If the text is there, the
+ledger records it as published and nothing is sent. If it isn't, Herald
+records that check and asks you to run again with `--retry`.
+
+The ledger is an append-only JSON Lines file keyed by the SHA-256 of the
+text. Herald writes an `uncertain` record before each request, so a crash or
+a cancelled job also leaves a record that the next run checks.
+
+`--dry-run` runs every check and never opens the X account.
+
+LinkedIn stays manual. LinkedIn's API terms don't allow automated posting,
+so `herald post --platform linkedin` exits with `not_sent` and asks you to
+paste the text into LinkedIn yourself.
+
+Reading recent posts and creating a post are paid X API calls on
+pay-per-use plans. Check the current prices in the X developer console.
 
 ## Configuration
 
