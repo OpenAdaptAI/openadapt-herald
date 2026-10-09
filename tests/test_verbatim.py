@@ -100,7 +100,7 @@ class TestWeightedLength:
         assert x_weighted_length(f"key {word}") == len("key ") + len(word)
 
     def test_long_explicit_link_still_counts_23(self):
-        link = "https://openadapt.runtime.verification.settings.timeout/x"
+        link = "https://openadapt.runtime.verification.settings.example.com/x"
         assert x_weighted_length(link) == 23
 
     def test_overlength_from_bare_domain_explains_https(self, tmp_path):
@@ -217,13 +217,29 @@ class TestRefusals:
         assert result.outcome is Outcome.NOT_SENT
         assert "credentials" in result.message
 
-    def test_corrupt_ledger_refuses(self, tmp_path):
+    def test_corrupt_ledger_refuses_and_stays_uncertain(self, tmp_path):
+        # Without a readable ledger an earlier post can't be ruled out.
         account = FakeAccount()
         poster, ledger = make_poster(tmp_path, account)
         ledger.path.write_text("{not json\n", encoding="utf-8")
         result = poster.post(TEXT)
-        assert result.outcome is Outcome.NOT_SENT
+        assert result.outcome is Outcome.UNCERTAIN
+        assert result.exit_code == 4
+        assert "sent nothing" in result.message
         assert account.created == []
+        assert account.timeline_reads == 0
+
+    def test_partial_ledger_line_after_a_post_stays_uncertain(self, tmp_path):
+        # A full disk can cut the "published" record short right after X
+        # accepted the post. The next run must not report not_sent.
+        account = FakeAccount(create_result="321")
+        poster, ledger = make_poster(tmp_path, account)
+        assert poster.post(TEXT).outcome is Outcome.PUBLISHED
+        lines = ledger.path.read_text(encoding="utf-8").splitlines()
+        ledger.path.write_text(lines[0] + "\n" + lines[1][:20], encoding="utf-8")
+        again = poster.post(TEXT)
+        assert again.outcome is Outcome.UNCERTAIN
+        assert account.created == [TEXT]
 
 
 # ----------------------------------------------------------------- publish
@@ -421,6 +437,21 @@ class TestUncertainNeverRetriesBlindly:
         assert result.outcome is Outcome.UNCERTAIN
         assert account.created == []
 
+    def test_account_open_failure_keeps_uncertain(self, tmp_path):
+        # Expired or missing credentials on the next run must not turn an
+        # uncertain attempt into not_sent.
+        ledger = self.first_attempt_uncertain(tmp_path)
+
+        def factory():
+            raise VerbatimError("X credentials are missing")
+
+        poster = VerbatimXPoster(factory, ledger, clock=lambda: NOW + timedelta(minutes=10))
+        result = poster.post(TEXT, retry=True)
+        assert result.outcome is Outcome.UNCERTAIN
+        assert result.exit_code == 4
+        assert "may still have posted" in result.message
+        assert ledger.current(content_sha256(TEXT), "x")["state"] == "uncertain"
+
     def test_timeline_read_failure_keeps_uncertain(self, tmp_path):
         ledger = self.first_attempt_uncertain(tmp_path)
         account = FakeAccount(timeline_error=RuntimeError("401"))
@@ -495,6 +526,7 @@ class TestPostCommand:
         mock_settings.return_value = MagicMock(
             twitter_consumer_key="ck", twitter_consumer_secret="cs",
             twitter_access_token="at", twitter_access_token_secret="ats",
+            dry_run=False,
         )
         account = FakeAccount(create_result="42")
         mock_account_cls.return_value = account
@@ -510,7 +542,7 @@ class TestPostCommand:
     @patch("herald.verbatim.TweepyXAccount")
     @patch("herald.cli._get_settings")
     def test_live_uncertain_exit_four(self, mock_settings, mock_account_cls, tmp_path):
-        mock_settings.return_value = MagicMock()
+        mock_settings.return_value = MagicMock(dry_run=False)
         mock_account_cls.return_value = FakeAccount(
             create_error=requests.exceptions.ReadTimeout("slow"))
         result = runner.invoke(app, [
@@ -525,12 +557,35 @@ class TestPostCommand:
     def test_ledger_path_from_settings(self, mock_settings, mock_account_cls, tmp_path):
         # HERALD_POST_LEDGER in a .env file reaches the command through settings.
         ledger = tmp_path / "from-settings.jsonl"
-        mock_settings.return_value = MagicMock(post_ledger=str(ledger))
+        mock_settings.return_value = MagicMock(post_ledger=str(ledger), dry_run=False)
         mock_account_cls.return_value = FakeAccount(create_result="43")
         result = runner.invoke(app, ["post", "--file", str(self.write(tmp_path))],
                                env={"HERALD_POST_LEDGER": None})
         assert result.exit_code == 0, result.output
         assert ledger.exists()
+
+
+    @patch("herald.verbatim.TweepyXAccount")
+    def test_herald_dry_run_setting_keeps_post_preview_only(
+        self, mock_account_cls, tmp_path, monkeypatch
+    ):
+        # HERALD_DRY_RUN=true is documented as preview-only for every command.
+        monkeypatch.setenv("HERALD_DRY_RUN", "true")
+        monkeypatch.setenv("HERALD_TWITTER_CONSUMER_KEY", "ck")
+        monkeypatch.setenv("HERALD_TWITTER_CONSUMER_SECRET", "cs")
+        monkeypatch.setenv("HERALD_TWITTER_ACCESS_TOKEN", "at")
+        monkeypatch.setenv("HERALD_TWITTER_ACCESS_TOKEN_SECRET", "ats")
+        monkeypatch.chdir(tmp_path)
+        account = FakeAccount()
+        mock_account_cls.return_value = account
+        ledger = tmp_path / "ledger.jsonl"
+        result = runner.invoke(app, ["post", "--file", str(self.write(tmp_path)),
+                                     "--ledger", str(ledger), "--json"])
+        assert result.exit_code == 3, result.output
+        assert json.loads(result.output)["message"].startswith("dry run")
+        mock_account_cls.assert_not_called()
+        assert account.created == []
+        assert not ledger.exists()
 
 
 def test_settings_read_post_ledger_from_dotenv(tmp_path, monkeypatch):

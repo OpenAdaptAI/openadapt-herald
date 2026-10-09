@@ -7,9 +7,12 @@ Every attempt ends in one of three states:
 
 - ``published``: X returned the new post's id. The ledger records it.
 - ``not_sent``: nothing was posted. Either the request never left this
-  machine, or X processed it and refused it (a 4xx answer).
-- ``uncertain``: the request may have reached X and we don't know whether a
-  post exists (timeout after sending, a 5xx answer, a reply without an id).
+  machine, X processed it and refused it (a 4xx answer), or a check of recent
+  posts after an uncertain attempt found no match.
+- ``uncertain``: a request may have reached X and we don't know whether a
+  post exists (timeout after sending, a 5xx answer, a reply without an id). A
+  run that can't read the ledger, or can't open the account after an uncertain
+  attempt, also reports ``uncertain``, because it can't rule out a post.
 
 An ``uncertain`` result is never retried blindly. The next run reads the
 account's own recent posts first. If the post is there, the ledger records it
@@ -55,8 +58,10 @@ _X_LIGHT_RANGES = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))
 # Explicit links, and bare domains that X may turn into links. The bare-domain
 # pattern is deliberately generous, so it also matches dotted words that X
 # leaves as plain text (for example a long config key). A bare-domain match
-# therefore counts as 23 or as its own length, whichever is longer: the
-# estimate can be too long, never too short.
+# therefore counts as 23 or as its own length, whichever is longer, so it never
+# counts short. An explicit http(s) link always counts as 23. X can count more
+# (a domain it doesn't recognize, or an emoji typed straight after the link);
+# then X refuses the overlong post, which is reported as not_sent.
 _EXPLICIT_URL = r"https?://[^\s<>\"']+"
 _BARE_DOMAIN = (
     r"(?<![\w@.\-/])"
@@ -148,11 +153,11 @@ def find_urls(text: str) -> list[str]:
 
 
 def x_weighted_length(text: str) -> int:
-    """Weighted length as X counts it, never shorter than X's count.
+    """Weighted length as X counts it, leaning long where X's choice is unclear.
 
-    A link written with http:// or https:// counts as 23. A bare domain counts
-    as 23 or as its own weighted length, whichever is longer, because X may
-    leave it as plain text.
+    A link written with http:// or https:// counts as 23, which is how X counts
+    a link on a domain it recognizes. A bare domain counts as 23 or as its own
+    weighted length, whichever is longer, because X may leave it as plain text.
     """
     normalized = unicodedata.normalize("NFC", text)
     total = 0
@@ -405,6 +410,11 @@ def classify_send_error(exc: BaseException) -> tuple[Outcome, str]:
 # --------------------------------------------------------------------------
 
 
+def _clause(exc: BaseException) -> str:
+    """An error message without its final period, for use inside a sentence."""
+    return str(exc).rstrip(" .")
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -516,7 +526,16 @@ class VerbatimXPoster:
         try:
             current = self.ledger.current(sha, self.platform) if self.ledger else None
         except VerbatimError as exc:
-            return self._result(Outcome.NOT_SENT, sha, str(exc), weighted_length=length)
+            # An interrupted append (a crash or a full disk right after a post)
+            # is the likeliest way a ledger breaks, so an unreadable ledger
+            # can't rule out an earlier post.
+            return self._result(
+                Outcome.UNCERTAIN, sha,
+                f"{_clause(exc)}. This run sent nothing. Without a readable ledger, Herald can't "
+                "tell whether an earlier attempt posted this text. Repair the ledger, "
+                "then run again.",
+                weighted_length=length,
+            )
 
         state = (current or {}).get("state")
         needs_retry_flag = (
@@ -567,8 +586,16 @@ class VerbatimXPoster:
         try:
             self._account_or_raise()
         except Exception as exc:  # noqa: BLE001 - nothing was sent
+            if state == Outcome.UNCERTAIN.value:
+                return self._result(
+                    Outcome.UNCERTAIN, sha,
+                    f"the last attempt is uncertain and the X account could not be opened: "
+                    f"{_clause(exc)}. This run sent nothing; the earlier attempt may still "
+                    "have posted.",
+                    weighted_length=length,
+                )
             return self._result(Outcome.NOT_SENT, sha, f"cannot open X account: {exc}",
-                                weighted_length=length)
+                                weighted_length=length, reconciled=needs_retry_flag)
 
         if state == Outcome.UNCERTAIN.value:
             reconciled = self._reconcile(text, sha, current, retry, length)
@@ -684,8 +711,12 @@ class VerbatimXPoster:
         try:
             self._record(sha, Outcome.PUBLISHED, "created", post_id=post_id, url=url)
         except OSError as ledger_exc:
-            message += (f"; the ledger write failed ({ledger_exc}), so the next run will "
-                        "find this post on the timeline before it sends anything")
+            # The write-ahead record still says "uncertain", so the next run
+            # checks recent posts first. A partly written line makes the ledger
+            # unreadable, and the next run then refuses until it is repaired.
+            message += (f", but the ledger write failed ({ledger_exc}). Check the ledger "
+                        "before the next run; that run reads recent posts before it sends "
+                        "anything")
         return self._result(Outcome.PUBLISHED, sha, message, post_id=post_id,
                             url=url, weighted_length=length)
 

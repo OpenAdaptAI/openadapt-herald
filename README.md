@@ -89,7 +89,8 @@ What it checks before it sends anything:
   characters and most CJK characters and emoji as 2. Herald counts the same
   way and leans long when it can't tell whether X will treat a word as a link.
   A link written without `https://` counts as 23 or its full length,
-  whichever is longer.
+  whichever is longer. If X still refuses the text as too long, the result
+  is `not_sent`.
 - The ledger has no record that this exact text was already posted.
 
 Each run reports one of three results, with its own exit code. The result
@@ -97,9 +98,13 @@ tells you whether the post exists on X, even when this run sent nothing.
 
 | Result | Exit code | What it means |
 |---|---|---|
-| `published` | 0 | The post is on X: X returned its id, or Herald found it on the account. It's in the ledger. |
+| `published` | 0 | The post is on X. X returned its id, or Herald found it on the account. It's in the ledger. |
 | `not_sent` | 3 | Herald didn't post. The request never left this machine, X refused it, or a check of recent posts found no match after an earlier `uncertain` attempt (`"reconciled": true` in the JSON). |
 | `uncertain` | 4 | A request may have reached X, and Herald can't tell yet whether a post exists. |
+
+Herald also reports `uncertain` when it can't read the ledger, or can't open
+the X account after an earlier `uncertain` attempt. In both cases this run
+sent nothing, but Herald can't rule out an earlier post.
 
 After an `uncertain` result, Herald doesn't retry on its own. The next run
 reads the account's 20 most recent posts first. If the text is there, the
@@ -112,18 +117,21 @@ before it sends.
 The ledger is an append-only JSON Lines file keyed by the SHA-256 of the
 text. Herald writes an `uncertain` record before each request, so a crash or
 a cancelled job also leaves a record that the next run checks. Keep the
-ledger somewhere that outlasts the job. `--precheck-timeline` adds a second
-guard: Herald skips the post if the text is among the account's 20 most
-recent posts. Set the ledger path with `--ledger` or `HERALD_POST_LEDGER`
-(environment or `.env`).
+ledger somewhere that outlasts the job, and run one `herald post` at a time
+per ledger, because two runs at once can both send. With
+`--precheck-timeline`, Herald also skips the post if the text is among the
+account's 20 most recent posts. Set the ledger path with `--ledger` or
+`HERALD_POST_LEDGER` (environment or `.env`).
 
 `--dry-run` runs the local checks (hash, length, ledger) and never opens the
-X account. It reads the ledger, so a dry run after an `uncertain` attempt
-also reports `uncertain`.
+X account. `HERALD_DRY_RUN=true` has the same effect. A dry run reads the
+ledger, so a dry run after an `uncertain` attempt also reports `uncertain`.
 
-LinkedIn stays manual. LinkedIn's API terms don't allow automated posting,
-so `herald post --platform linkedin` exits with `not_sent` and asks you to
-paste the text into LinkedIn yourself.
+LinkedIn stays manual. LinkedIn's
+[API Terms of Use](https://www.linkedin.com/legal/l/api-terms-of-use)
+(section 3.1) don't allow using its APIs to automate posting, so
+`herald post --platform linkedin` exits with `not_sent` and asks you to paste
+the text into LinkedIn yourself.
 
 Reading recent posts and creating a post are paid X API calls on
 pay-per-use plans. Check the current prices in the X developer console.

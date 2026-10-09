@@ -218,7 +218,9 @@ def post(
         "approved hash. --dry-run --json prints it as content_sha256.",
     ),
     dry_run: bool = typer.Option(
-        False, help="Run the local checks (hash, length, ledger); never open the X account"
+        False,
+        help="Run the local checks (hash, length, ledger); never open the X account. "
+        "HERALD_DRY_RUN=true has the same effect.",
     ),
     retry: bool = typer.Option(
         False,
@@ -299,7 +301,8 @@ def post(
     result = poster.post(
         text,
         expect_sha256=expect_sha256,
-        dry_run=dry_run,
+        # HERALD_DRY_RUN=true keeps every command preview-only, as it does for `publish`.
+        dry_run=dry_run or settings.dry_run,
         retry=retry,
         precheck_timeline=precheck_timeline,
     )
