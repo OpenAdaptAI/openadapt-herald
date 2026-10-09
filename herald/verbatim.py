@@ -13,8 +13,13 @@ Every attempt ends in one of three states:
 
 An ``uncertain`` result is never retried blindly. The next run reads the
 account's own recent posts first. If the post is there, the ledger records it
-as published and nothing is sent. If it isn't, the ledger records that check,
-and a new attempt needs ``retry=True``.
+as published and nothing is sent. If it isn't (and the attempt is older than
+the settle time), the ledger records that check, and a new attempt needs
+``retry=True``. A retry reads the recent posts once more before it sends.
+
+A result tells you whether the post exists on X, even when the run itself
+sent nothing. A dry run after an uncertain attempt therefore reports
+``uncertain`` too.
 
 The ledger is an append-only JSON Lines file keyed by the SHA-256 of the text.
 A record with ``state: uncertain`` is written *before* each request is sent,
@@ -31,7 +36,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -47,9 +52,11 @@ _X_SCALE = 100
 _X_DEFAULT_WEIGHT = 200
 _X_LIGHT_RANGES = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))
 
-# Explicit links, and bare domains that X turns into links. The bare-domain
-# pattern is deliberately generous: counting something as a 23-character link
-# when X would not can only make the estimate too long, never too short.
+# Explicit links, and bare domains that X may turn into links. The bare-domain
+# pattern is deliberately generous, so it also matches dotted words that X
+# leaves as plain text (for example a long config key). A bare-domain match
+# therefore counts as 23 or as its own length, whichever is longer: the
+# estimate can be too long, never too short.
 _EXPLICIT_URL = r"https?://[^\s<>\"']+"
 _BARE_DOMAIN = (
     r"(?<![\w@.\-/])"
@@ -57,6 +64,7 @@ _BARE_DOMAIN = (
     r"(?::\d{2,5})?(?:/[^\s<>\"']*)?"
 )
 URL_RE = re.compile(f"{_EXPLICIT_URL}|{_BARE_DOMAIN}", re.IGNORECASE)
+_EXPLICIT_URL_RE = re.compile(_EXPLICIT_URL, re.IGNORECASE)
 _TRAILING_PUNCTUATION = ".,;:!?)]}'\""
 
 EXIT_CODES = {"published": 0, "not_sent": 3, "uncertain": 4}
@@ -140,7 +148,12 @@ def find_urls(text: str) -> list[str]:
 
 
 def x_weighted_length(text: str) -> int:
-    """Weighted length as X counts it (links count as 23)."""
+    """Weighted length as X counts it, never shorter than X's count.
+
+    A link written with http:// or https:// counts as 23. A bare domain counts
+    as 23 or as its own weighted length, whichever is longer, because X may
+    leave it as plain text.
+    """
     normalized = unicodedata.normalize("NFC", text)
     total = 0
     position = 0
@@ -150,11 +163,25 @@ def x_weighted_length(text: str) -> int:
             continue
         start = match.start()
         total += _weigh(normalized[position:start])
-        total += X_URL_LENGTH * _X_SCALE
+        if _EXPLICIT_URL_RE.match(span):
+            total += X_URL_LENGTH * _X_SCALE
+        else:
+            total += max(X_URL_LENGTH * _X_SCALE, _weigh(span))
         position = start + len(span)
     total += _weigh(normalized[position:])
     # Every weight is a multiple of the scale, so this division is exact.
     return total // _X_SCALE
+
+
+def has_long_bare_domain(text: str) -> bool:
+    """True if a link without http(s):// counts at its full length (over 23)."""
+    normalized = unicodedata.normalize("NFC", text)
+    for match in URL_RE.finditer(normalized):
+        span = match.group(0).rstrip(_TRAILING_PUNCTUATION)
+        if span and not _EXPLICIT_URL_RE.match(span):
+            if _weigh(span) > X_URL_LENGTH * _X_SCALE:
+                return True
+    return False
 
 
 def _weigh(segment: str) -> int:
@@ -439,16 +466,17 @@ class VerbatimXPoster:
             }
         )
 
-    def _find_on_timeline(self, text: str, since: datetime | None) -> dict[str, Any] | None:
+    def _find_on_timeline(self, text: str) -> dict[str, Any] | None:
+        """Return a recent post with the same text, whenever it was posted.
+
+        Posting is idempotent by text, so any matching post counts. This also
+        covers X's duplicate-content refusal, where the match is an older post.
+        """
         wanted = normalize_for_match(text)
         posts = self._account_or_raise().recent_posts(self.timeline_limit)
         for post in posts:
-            if normalize_for_match(post.get("text", "")) != wanted:
-                continue
-            created = _parse_time(post.get("created_at", ""))
-            if since is not None and created is not None and created < since:
-                continue
-            return post
+            if normalize_for_match(post.get("text", "")) == wanted:
+                return post
         return None
 
     # -- main entry --------------------------------------------------------
@@ -464,21 +492,26 @@ class VerbatimXPoster:
     ) -> PostResult:
         sha = content_sha256(text)
         length = x_weighted_length(text)
+        expected = expect_sha256.strip().lower()
 
-        if expect_sha256 and expect_sha256.lower() != sha:
+        if expected and expected != sha:
             return self._result(
                 Outcome.NOT_SENT, sha,
-                f"text hash {sha} does not match the approved hash {expect_sha256}; "
-                "the text changed after approval",
+                f"text hash {sha} does not match the approved hash {expected}. Either "
+                "the text changed after approval, or the approved hash was taken over "
+                "different bytes (Herald hashes the text without trailing newlines; "
+                "--dry-run --json prints the hash it uses).",
                 weighted_length=length,
             )
         if length > X_MAX_WEIGHTED_LENGTH:
-            return self._result(
-                Outcome.NOT_SENT, sha,
+            message = (
                 f"text is {length} weighted characters; X allows {X_MAX_WEIGHTED_LENGTH}. "
-                "Shorten the approved text. Herald never truncates.",
-                weighted_length=length,
+                "Shorten the approved text. Herald never truncates."
             )
+            if has_long_bare_domain(text):
+                message += (" A link without https:// counts at its full length when "
+                            "that is over 23; add https:// so it counts as 23.")
+            return self._result(Outcome.NOT_SENT, sha, message, weighted_length=length)
 
         try:
             current = self.ledger.current(sha, self.platform) if self.ledger else None
@@ -486,6 +519,9 @@ class VerbatimXPoster:
             return self._result(Outcome.NOT_SENT, sha, str(exc), weighted_length=length)
 
         state = (current or {}).get("state")
+        needs_retry_flag = (
+            state == Outcome.NOT_SENT.value and bool((current or {}).get("reconciled"))
+        )
 
         if state == Outcome.PUBLISHED.value:
             return self._result(
@@ -497,11 +533,21 @@ class VerbatimXPoster:
 
         if dry_run:
             if state == Outcome.UNCERTAIN.value:
-                message = ("dry run: the last attempt is uncertain. A live run reads the "
-                           "account's recent posts before it does anything else.")
+                # The result describes whether a post exists, not what this run
+                # did. An earlier attempt may have posted, so this stays uncertain.
+                return self._result(
+                    Outcome.UNCERTAIN, sha,
+                    "dry run: the last attempt is uncertain, so a post may already exist. "
+                    "A live run reads the account's recent posts before it sends anything.",
+                    weighted_length=length,
+                )
+            if needs_retry_flag and not retry:
+                message = ("dry run: an earlier attempt was uncertain and a check found no "
+                           "matching post. A live run needs --retry to post it.")
             else:
                 message = f"dry run: would post {length} weighted characters"
-            return self._result(Outcome.NOT_SENT, sha, message, weighted_length=length)
+            return self._result(Outcome.NOT_SENT, sha, message, weighted_length=length,
+                                reconciled=needs_retry_flag)
 
         if self.ledger is None:
             return self._result(
@@ -510,7 +556,7 @@ class VerbatimXPoster:
                 weighted_length=length,
             )
 
-        if state == Outcome.NOT_SENT.value and (current or {}).get("reconciled") and not retry:
+        if needs_retry_flag and not retry:
             return self._result(
                 Outcome.NOT_SENT, sha,
                 "an earlier attempt was uncertain and a check found no matching post. "
@@ -528,23 +574,22 @@ class VerbatimXPoster:
             reconciled = self._reconcile(text, sha, current, retry, length)
             if reconciled is not None:
                 return reconciled
-        elif precheck_timeline:
+        elif precheck_timeline or needs_retry_flag:
+            # A --retry after an uncertain attempt always reads the timeline
+            # again first: the earlier post may have appeared since the check.
             try:
-                found = self._find_on_timeline(text, since=None)
+                found = self._find_on_timeline(text)
             except Exception as exc:  # noqa: BLE001
                 return self._result(
                     Outcome.NOT_SENT, sha,
-                    f"could not read recent posts before posting, so nothing was sent: {exc}",
-                    weighted_length=length,
+                    f"could not read recent posts before posting, so this run sent "
+                    f"nothing: {exc}",
+                    weighted_length=length, reconciled=needs_retry_flag,
                 )
             if found:
-                url = f"https://x.com/i/status/{found['id']}"
-                self._record(sha, Outcome.PUBLISHED, "found on timeline before posting",
-                             post_id=found["id"], url=url, reconciled=True)
-                return self._result(Outcome.PUBLISHED, sha,
-                                    "a matching post already exists; not posting again",
-                                    post_id=found["id"], url=url, weighted_length=length,
-                                    reconciled=True)
+                return self._found(sha, found, "found on timeline before posting",
+                                   "a matching post already exists; not posting again",
+                                   length)
 
         return self._send(text, sha, length)
 
@@ -555,34 +600,42 @@ class VerbatimXPoster:
         attempted_at = _parse_time(current.get("at", "")) or self.clock()
         age = (self.clock() - attempted_at).total_seconds()
         try:
-            found = self._find_on_timeline(text, since=attempted_at - timedelta(minutes=10))
+            found = self._find_on_timeline(text)
         except Exception as exc:  # noqa: BLE001
             return self._result(
                 Outcome.UNCERTAIN, sha,
                 f"the last attempt is uncertain and recent posts could not be read: {exc}. "
-                "Nothing was sent.",
+                "This run sent nothing; the earlier attempt may still have posted.",
                 weighted_length=length,
             )
         if found:
-            url = f"https://x.com/i/status/{found['id']}"
-            self._record(sha, Outcome.PUBLISHED, "reconciled: found on timeline",
-                         post_id=found["id"], url=url, reconciled=True)
-            return self._result(Outcome.PUBLISHED, sha,
-                                "the uncertain attempt did publish; recorded it",
-                                post_id=found["id"], url=url, weighted_length=length,
-                                reconciled=True)
+            return self._found(sha, found, "reconciled: found on timeline",
+                               "found a matching post on the account after an uncertain "
+                               "attempt; recorded it as published and sent nothing",
+                               length)
         if age < self.settle_seconds:
             return self._result(
                 Outcome.UNCERTAIN, sha,
-                f"the last attempt was {int(age)} seconds ago; wait at least "
-                f"{self.settle_seconds} seconds before checking again. Nothing was sent.",
+                f"the last attempt was {int(age)} seconds ago and no matching post is "
+                f"visible yet. Wait at least {self.settle_seconds} seconds after the "
+                "attempt, then run again. This run sent nothing; the earlier attempt may "
+                "still have posted.",
                 weighted_length=length,
             )
-        self._record(
-            sha, Outcome.NOT_SENT,
-            f"reconciled: no matching post in the last {self.timeline_limit} posts",
-            reconciled=True,
-        )
+        try:
+            self._record(
+                sha, Outcome.NOT_SENT,
+                f"reconciled: no matching post in the last {self.timeline_limit} posts",
+                reconciled=True,
+            )
+        except OSError as exc:
+            # The ledger still says uncertain, so the next run checks again.
+            return self._result(
+                Outcome.UNCERTAIN, sha,
+                f"found no matching post, but could not record that check ({exc}). "
+                "This run sent nothing; fix the ledger and run again.",
+                weighted_length=length,
+            )
         if not retry:
             return self._result(
                 Outcome.NOT_SENT, sha,
@@ -591,6 +644,20 @@ class VerbatimXPoster:
                 weighted_length=length, reconciled=True,
             )
         return None
+
+    def _found(
+        self, sha: str, found: dict[str, Any], detail: str, message: str, length: int
+    ) -> PostResult:
+        """Record and report a matching post found on the account's timeline."""
+        url = f"https://x.com/i/status/{found['id']}"
+        try:
+            self._record(sha, Outcome.PUBLISHED, detail, post_id=found["id"], url=url,
+                         reconciled=True)
+        except OSError as exc:
+            message += (f"; the ledger write failed ({exc}), so the ledger doesn't "
+                        "show this post yet")
+        return self._result(Outcome.PUBLISHED, sha, message, post_id=found["id"],
+                            url=url, weighted_length=length, reconciled=True)
 
     def _send(self, text: str, sha: str, length: int) -> PostResult:
         # Write-ahead: if this process dies mid-request, the ledger already

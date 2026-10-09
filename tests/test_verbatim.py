@@ -94,6 +94,24 @@ class TestWeightedLength:
     def test_cjk_counts_two(self):
         assert x_weighted_length("日本") == 4
 
+    def test_long_dotted_word_never_counts_short(self):
+        # X may leave this as plain text, so it must not count as only 23.
+        word = "openadapt.runtime.verification.settings.timeout"
+        assert x_weighted_length(f"key {word}") == len("key ") + len(word)
+
+    def test_long_explicit_link_still_counts_23(self):
+        link = "https://openadapt.runtime.verification.settings.timeout/x"
+        assert x_weighted_length(link) == 23
+
+    def test_overlength_from_bare_domain_explains_https(self, tmp_path):
+        account = FakeAccount()
+        poster, _ = make_poster(tmp_path, account)
+        text = "a" * 250 + " openadapt.ai/posts/a-long-article-slug"
+        result = poster.post(text)
+        assert result.outcome is Outcome.NOT_SENT
+        assert "https://" in result.message
+        assert account.created == []
+
     def test_exactly_280_is_allowed(self, tmp_path):
         account = FakeAccount()
         poster, _ = make_poster(tmp_path, account)
@@ -144,6 +162,35 @@ class TestRefusals:
         result = poster.post(TEXT, expect_sha256=content_sha256(TEXT))
         assert result.outcome is Outcome.PUBLISHED
         assert account.created == [TEXT]
+
+    def test_matching_hash_tolerates_case_and_whitespace(self, tmp_path):
+        account = FakeAccount()
+        poster, _ = make_poster(tmp_path, account)
+        result = poster.post(TEXT, expect_sha256=f" {content_sha256(TEXT).upper()}\n")
+        assert result.outcome is Outcome.PUBLISHED
+
+    def test_dry_run_after_uncertain_attempt_stays_uncertain(self, tmp_path):
+        ledger = Ledger(tmp_path / "l.jsonl")
+        ledger.append({"content_sha256": content_sha256(TEXT), "platform": "x",
+                       "state": "uncertain", "at": NOW.isoformat(),
+                       "detail": "attempt started"})
+        factory = MagicMock(side_effect=AssertionError("must not build a client"))
+        poster = VerbatimXPoster(factory, ledger, clock=lambda: NOW)
+        result = poster.post(TEXT, dry_run=True)
+        assert result.outcome is Outcome.UNCERTAIN
+        assert result.exit_code == 4
+        factory.assert_not_called()
+
+    def test_dry_run_after_reconciled_check_mentions_retry(self, tmp_path):
+        ledger = Ledger(tmp_path / "l.jsonl")
+        ledger.append({"content_sha256": content_sha256(TEXT), "platform": "x",
+                       "state": "not_sent", "at": NOW.isoformat(),
+                       "detail": "reconciled", "reconciled": True})
+        poster = VerbatimXPoster(MagicMock(), ledger, clock=lambda: NOW)
+        result = poster.post(TEXT, dry_run=True)
+        assert result.outcome is Outcome.NOT_SENT
+        assert "--retry" in result.message
+        assert result.reconciled
 
     def test_dry_run_never_opens_the_account(self, tmp_path):
         factory = MagicMock(side_effect=AssertionError("must not build a client"))
@@ -289,6 +336,19 @@ class TestUncertainNeverRetriesBlindly:
         assert account.created == []
         assert account.timeline_reads == 1
 
+    def test_reconcile_accepts_an_older_matching_post(self, tmp_path):
+        # X refuses duplicate text, so the match can predate the attempt.
+        ledger = self.first_attempt_uncertain(tmp_path)
+        later = NOW + timedelta(minutes=5)
+        account = FakeAccount(timeline=[
+            {"id": "800", "text": TEXT, "created_at": (NOW - timedelta(days=2)).isoformat()},
+        ])
+        poster = VerbatimXPoster(lambda: account, ledger, clock=lambda: later)
+        result = poster.post(TEXT, retry=True)
+        assert result.outcome is Outcome.PUBLISHED
+        assert result.post_id == "800"
+        assert account.created == []
+
     def test_too_soon_stays_uncertain(self, tmp_path):
         ledger = self.first_attempt_uncertain(tmp_path)
         account = FakeAccount(timeline=[])
@@ -297,6 +357,9 @@ class TestUncertainNeverRetriesBlindly:
         result = poster.post(TEXT, retry=True)
         assert result.outcome is Outcome.UNCERTAIN
         assert account.created == []
+        # Never imply that nothing was posted while the state is uncertain.
+        assert "Nothing was sent" not in result.message
+        assert "may still have posted" in result.message
 
     def test_absent_after_settle_needs_retry_flag(self, tmp_path):
         ledger = self.first_attempt_uncertain(tmp_path)
@@ -317,6 +380,46 @@ class TestUncertainNeverRetriesBlindly:
         retried = poster.post(TEXT, retry=True)
         assert retried.outcome is Outcome.PUBLISHED
         assert account.created == [TEXT]
+
+    def test_retry_reads_timeline_again_before_sending(self, tmp_path):
+        ledger = self.first_attempt_uncertain(tmp_path)
+        later = NOW + timedelta(minutes=10)
+        empty = FakeAccount(timeline=[])
+        poster = VerbatimXPoster(lambda: empty, ledger, clock=lambda: later)
+        assert poster.post(TEXT).outcome is Outcome.NOT_SENT
+
+        # The slow first attempt shows up before the person runs --retry.
+        late = FakeAccount(timeline=[{"id": "901", "text": TEXT,
+                                      "created_at": NOW.isoformat()}])
+        poster = VerbatimXPoster(lambda: late, ledger,
+                                 clock=lambda: later + timedelta(hours=1))
+        result = poster.post(TEXT, retry=True)
+        assert result.outcome is Outcome.PUBLISHED
+        assert result.post_id == "901"
+        assert late.timeline_reads == 1
+        assert late.created == []
+
+    def test_retry_with_unreadable_timeline_sends_nothing(self, tmp_path):
+        ledger = self.first_attempt_uncertain(tmp_path)
+        later = NOW + timedelta(minutes=10)
+        poster = VerbatimXPoster(lambda: FakeAccount(), ledger, clock=lambda: later)
+        assert poster.post(TEXT).outcome is Outcome.NOT_SENT
+
+        broken = FakeAccount(timeline_error=RuntimeError("503"))
+        poster = VerbatimXPoster(lambda: broken, ledger, clock=lambda: later)
+        result = poster.post(TEXT, retry=True)
+        assert result.outcome is Outcome.NOT_SENT
+        assert broken.created == []
+
+    def test_unwritable_ledger_during_check_stays_uncertain(self, tmp_path):
+        ledger = self.first_attempt_uncertain(tmp_path)
+        later = NOW + timedelta(minutes=10)
+        account = FakeAccount(timeline=[])
+        poster = VerbatimXPoster(lambda: account, ledger, clock=lambda: later)
+        with patch.object(Ledger, "append", side_effect=OSError("disk full")):
+            result = poster.post(TEXT, retry=True)
+        assert result.outcome is Outcome.UNCERTAIN
+        assert account.created == []
 
     def test_timeline_read_failure_keeps_uncertain(self, tmp_path):
         ledger = self.first_attempt_uncertain(tmp_path)
@@ -416,3 +519,25 @@ class TestPostCommand:
         ])
         assert result.exit_code == 4
         assert "uncertain" in result.output
+
+    @patch("herald.verbatim.TweepyXAccount")
+    @patch("herald.cli._get_settings")
+    def test_ledger_path_from_settings(self, mock_settings, mock_account_cls, tmp_path):
+        # HERALD_POST_LEDGER in a .env file reaches the command through settings.
+        ledger = tmp_path / "from-settings.jsonl"
+        mock_settings.return_value = MagicMock(post_ledger=str(ledger))
+        mock_account_cls.return_value = FakeAccount(create_result="43")
+        result = runner.invoke(app, ["post", "--file", str(self.write(tmp_path))],
+                               env={"HERALD_POST_LEDGER": None})
+        assert result.exit_code == 0, result.output
+        assert ledger.exists()
+
+
+def test_settings_read_post_ledger_from_dotenv(tmp_path, monkeypatch):
+    from herald.config import HeraldSettings
+
+    monkeypatch.delenv("HERALD_POST_LEDGER", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("HERALD_POST_LEDGER=/data/ledger.jsonl\n",
+                                   encoding="utf-8")
+    assert HeraldSettings().post_ledger == "/data/ledger.jsonl"

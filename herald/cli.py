@@ -213,11 +213,17 @@ def post(
         help="Append-only JSON Lines ledger. Required for a live post.",
     ),
     expect_sha256: str = typer.Option(
-        "", help="Refuse unless the text's SHA-256 equals this approved hash"
+        "",
+        help="Refuse unless the text's SHA-256 (without trailing newlines) equals this "
+        "approved hash. --dry-run --json prints it as content_sha256.",
     ),
-    dry_run: bool = typer.Option(False, help="Check everything; post nothing"),
+    dry_run: bool = typer.Option(
+        False, help="Run the local checks (hash, length, ledger); never open the X account"
+    ),
     retry: bool = typer.Option(
-        False, help="Post again after a check proved an uncertain attempt did not publish"
+        False,
+        help="Post again after a check of recent posts found no match for an "
+        "uncertain attempt",
     ),
     precheck_timeline: bool = typer.Option(
         False, help="Read the account's recent posts first and skip if the text is there"
@@ -286,7 +292,10 @@ def post(
             access_token_secret=settings.twitter_access_token_secret,
         )
 
-    poster = VerbatimXPoster(account_factory, Ledger(Path(ledger)) if ledger else None)
+    # The option also reads HERALD_POST_LEDGER from the process environment;
+    # the settings fallback picks it up from a .env file.
+    ledger_path = ledger or settings.post_ledger
+    poster = VerbatimXPoster(account_factory, Ledger(Path(ledger_path)) if ledger_path else None)
     result = poster.post(
         text,
         expect_sha256=expect_sha256,

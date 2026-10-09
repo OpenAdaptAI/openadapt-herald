@@ -74,37 +74,52 @@ it refuses and tells you by how much.
 ```bash
 herald post --file approved.txt --platform x \
   --ledger post-ledger.jsonl \
-  --expect-sha256 <hash of the approved text> \
+  --expect-sha256 <approved content_sha256> \
   --precheck-timeline
 ```
 
 What it checks before it sends anything:
 
-- The SHA-256 of the file matches `--expect-sha256`, so an edit after
-  approval stops the post.
+- The SHA-256 of the text matches `--expect-sha256`, so an edit after
+  approval stops the post. Herald hashes the file's text without its
+  trailing newlines. To get that hash, run
+  `herald post --file approved.txt --dry-run --json` and copy
+  `content_sha256`.
 - The text fits X's 280 weighted characters. X counts every link as 23
   characters and most CJK characters and emoji as 2. Herald counts the same
   way and leans long when it can't tell whether X will treat a word as a link.
+  A link written without `https://` counts as 23 or its full length,
+  whichever is longer.
 - The ledger has no record that this exact text was already posted.
 
-Every run ends in one of three results, with its own exit code:
+Each run reports one of three results, with its own exit code. The result
+tells you whether the post exists on X, even when this run sent nothing.
 
 | Result | Exit code | What it means |
 |---|---|---|
-| `published` | 0 | X returned the new post's id. It's in the ledger. |
-| `not_sent` | 3 | Nothing was posted. Either the request never left this machine, or X refused it. |
-| `uncertain` | 4 | The request may have reached X, and Herald can't tell whether a post exists. |
+| `published` | 0 | The post is on X: X returned its id, or Herald found it on the account. It's in the ledger. |
+| `not_sent` | 3 | Herald didn't post. The request never left this machine, X refused it, or a check of recent posts found no match after an earlier `uncertain` attempt (`"reconciled": true` in the JSON). |
+| `uncertain` | 4 | A request may have reached X, and Herald can't tell yet whether a post exists. |
 
 After an `uncertain` result, Herald doesn't retry on its own. The next run
 reads the account's 20 most recent posts first. If the text is there, the
-ledger records it as published and nothing is sent. If it isn't, Herald
-records that check and asks you to run again with `--retry`.
+ledger records it as published and nothing is sent. If it isn't there yet
+and the attempt was less than 2 minutes ago, the result stays `uncertain`
+and you run again later. After that, Herald records the check and asks you
+to run again with `--retry`. A `--retry` run reads the recent posts once more
+before it sends.
 
 The ledger is an append-only JSON Lines file keyed by the SHA-256 of the
 text. Herald writes an `uncertain` record before each request, so a crash or
-a cancelled job also leaves a record that the next run checks.
+a cancelled job also leaves a record that the next run checks. Keep the
+ledger somewhere that outlasts the job. `--precheck-timeline` adds a second
+guard: Herald skips the post if the text is among the account's 20 most
+recent posts. Set the ledger path with `--ledger` or `HERALD_POST_LEDGER`
+(environment or `.env`).
 
-`--dry-run` runs every check and never opens the X account.
+`--dry-run` runs the local checks (hash, length, ledger) and never opens the
+X account. It reads the ledger, so a dry run after an `uncertain` attempt
+also reports `uncertain`.
 
 LinkedIn stays manual. LinkedIn's API terms don't allow automated posting,
 so `herald post --platform linkedin` exits with `not_sent` and asks you to
@@ -131,6 +146,7 @@ All settings are configurable via environment variables with `HERALD_` prefix:
 | `HERALD_DEFAULT_MODEL` | LLM model (default: `claude-sonnet-4-20250514`) |
 | `HERALD_LOOKBACK_DAYS` | Default lookback period (default: 7) |
 | `HERALD_DRY_RUN` | Set to `true` for preview-only mode |
+| `HERALD_POST_LEDGER` | Ledger file for `herald post` (required for a live verbatim post) |
 
 ## LinkedIn setup
 
