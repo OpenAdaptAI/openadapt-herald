@@ -19,6 +19,8 @@ WORKFLOW_FILES = sorted(WORKFLOWS_DIR.glob("*.y*ml"))
 RELEASE_ANNOUNCE = WORKFLOWS_DIR / "release-announce.yml"
 
 _EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+# An `if:` condition is an expression even without `${{ }}` around it.
+_BARE_IF = re.compile(r"^[ \t]*(?:-[ \t]+)?if[ \t]*:[ \t]*(.+)$", re.MULTILINE)
 _KEY = re.compile(r"([A-Za-z0-9_-]+)\s*:")
 _BOOLEAN_TYPE = re.compile(r"""type\s*:\s*["']?boolean["']?\s*(#.*)?$""")
 
@@ -54,7 +56,9 @@ def _string_comparisons(text: str, name: str) -> list[str]:
         rf"{ref}\s*[!=]=\s*['\"]|['\"]\s*[!=]=\s*{ref}",
         re.IGNORECASE,
     )
-    return [m.group(0).strip() for m in _EXPRESSION.finditer(text) if compare.search(m.group(1))]
+    expressions = [m.group(0) for m in _EXPRESSION.finditer(text)]
+    expressions += [m.group(1) for m in _BARE_IF.finditer(text) if "${{" not in m.group(1)]
+    return [expr.strip() for expr in expressions if compare.search(expr)]
 
 
 def _publish_step(text: str) -> str:
@@ -68,6 +72,31 @@ def test_release_announce_declares_dry_run_as_boolean():
     # Guards the text walker below: if it stops finding this input, the
     # comparison test would pass without checking anything.
     assert "dry_run" in _boolean_inputs(RELEASE_ANNOUNCE.read_text())
+
+
+def test_string_comparison_check_covers_every_expression_form():
+    # Guards the comparison finder: each of these forms ignores a boolean input.
+    workflow = """\
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+jobs:
+  a:
+    steps:
+      - if: inputs.dry_run == 'true'
+      - if: ${{ 'true' != inputs.dry_run }}
+      - run: echo ${{ inputs.dry_run == "true" && 'x' || '' }}
+      - if: github.event.inputs.dry_run == 'true'
+      - if: inputs.dry_run
+"""
+    assert _boolean_inputs(workflow) == {"dry_run"}
+    assert _string_comparisons(workflow, "dry_run") == [
+        "${{ 'true' != inputs.dry_run }}",
+        "${{ inputs.dry_run == \"true\" && 'x' || '' }}",
+        "inputs.dry_run == 'true'",
+    ]
 
 
 @pytest.mark.parametrize("workflow", WORKFLOW_FILES, ids=lambda p: p.name)
