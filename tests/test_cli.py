@@ -213,6 +213,22 @@ class TestModelCallErrors:
         assert "claude-sonnet-4-20250514" in result.output
         assert "HERALD_DEFAULT_MODEL" in result.output
 
+    @patch("herald.composer.compose")
+    @patch("herald.cli._get_settings")
+    @patch("herald.collector.collect_all")
+    def test_reply_without_text_prints_one_line(self, mock_collect, mock_settings, mock_compose):
+        from herald.composer import ComposeError
+
+        mock_settings.return_value = self._settings()
+        mock_collect.return_value = self._artifacts()
+        mock_compose.side_effect = ComposeError(
+            "The model returned no text (stop reason: refusal)."
+        )
+        result = runner.invoke(app, ["publish", "--repos", ".", "--dry-run"])
+        assert result.exit_code == 1
+        assert "returned no text" in result.output
+        assert "Traceback" not in result.output
+
     @patch("herald.composer.compose_with_consilium")
     @patch("herald.cli._get_settings")
     @patch("herald.collector.collect_all")

@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from anthropic.types import TextBlock, ThinkingBlock
 
 from herald.collector import Artifacts, Commit, Release
 from herald.composer import (
@@ -13,6 +14,10 @@ from herald.composer import (
     _load_writing_guide,
     compose,
 )
+
+
+def _text(text: str) -> TextBlock:
+    return TextBlock(type="text", text=text)
 
 
 class TestPromptLoading:
@@ -97,7 +102,7 @@ class TestCompose:
             "summary": "v1.0 with feature X",
         }
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=json.dumps(expected))]
+        mock_response.content = [_text(json.dumps(expected))]
         mock_client.messages.create.return_value = mock_response
 
         artifacts = [Artifacts(
@@ -118,7 +123,7 @@ class TestCompose:
         expected = {"discord": "test", "twitter": "test", "summary": "test"}
         wrapped = f"```json\n{json.dumps(expected)}\n```"
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=wrapped)]
+        mock_response.content = [_text(wrapped)]
         mock_client.messages.create.return_value = mock_response
 
         result = compose(
@@ -134,7 +139,7 @@ class TestCompose:
         mock_anthropic_cls.return_value = mock_client
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="Just a plain text response about the release.")]
+        mock_response.content = [_text("Just a plain text response about the release.")]
         mock_client.messages.create.return_value = mock_response
 
         result = compose(
@@ -151,7 +156,7 @@ class TestCompose:
         mock_anthropic_cls.return_value = mock_client
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"discord":"x","twitter":"y","summary":"z"}')]
+        mock_response.content = [_text('{"discord":"x","twitter":"y","summary":"z"}')]
         mock_client.messages.create.return_value = mock_response
 
         compose(
@@ -170,7 +175,7 @@ class TestCompose:
         mock_anthropic_cls.return_value = mock_client
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"discord":"x","twitter":"y","summary":"z"}')]
+        mock_response.content = [_text('{"discord":"x","twitter":"y","summary":"z"}')]
         mock_client.messages.create.return_value = mock_response
 
         compose(
@@ -181,6 +186,53 @@ class TestCompose:
 
         call_args = mock_client.messages.create.call_args
         assert call_args[1]["model"] == "claude-opus-4-6"
+
+
+    @patch("herald.composer.anthropic.Anthropic")
+    def test_compose_without_model_uses_the_setting(self, mock_anthropic_cls, monkeypatch):
+        monkeypatch.setenv("HERALD_DEFAULT_MODEL", "claude-test-model")
+        mock_client = mock_anthropic_cls.return_value
+        mock_client.messages.create.return_value = MagicMock(
+            content=[_text('{"discord":"x"}')]
+        )
+
+        compose([Artifacts(commits=[Commit("a", "A", "2026-01-01", "fix")])], api_key="k")
+
+        assert mock_client.messages.create.call_args[1]["model"] == "claude-test-model"
+
+    @patch("herald.composer.anthropic.Anthropic")
+    def test_compose_reads_text_after_a_thinking_block(self, mock_anthropic_cls):
+        # Current models think by default, so the reply can start with a
+        # thinking block whose text is empty.
+        mock_client = mock_anthropic_cls.return_value
+        mock_client.messages.create.return_value = MagicMock(
+            content=[
+                ThinkingBlock(type="thinking", thinking="", signature="sig"),
+                _text('{"discord": "Shipped v2", "twitter": "v2 is out"}'),
+            ],
+            stop_reason="end_turn",
+        )
+
+        result = compose(
+            [Artifacts(commits=[Commit("a", "A", "2026-01-01", "fix")])], api_key="k"
+        )
+
+        assert result == {"discord": "Shipped v2", "twitter": "v2 is out"}
+        # Thinking counts toward max_tokens, so leave room for it and the drafts.
+        assert mock_client.messages.create.call_args[1]["max_tokens"] >= 16000
+
+    @patch("herald.composer.anthropic.Anthropic")
+    def test_compose_without_text_raises(self, mock_anthropic_cls):
+        from herald.composer import ComposeError
+
+        mock_client = mock_anthropic_cls.return_value
+        mock_client.messages.create.return_value = MagicMock(
+            content=[ThinkingBlock(type="thinking", thinking="", signature="sig")],
+            stop_reason="max_tokens",
+        )
+
+        with pytest.raises(ComposeError, match="max_tokens"):
+            compose([Artifacts(commits=[Commit("a", "A", "2026-01-01", "fix")])], api_key="k")
 
 
 class TestComposeWithConsilium:

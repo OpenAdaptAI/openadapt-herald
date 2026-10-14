@@ -141,7 +141,7 @@ to `.env`.
 | `HERALD_LINKEDIN_ACCESS_TOKEN` | LinkedIn OAuth2 access token (`w_member_social` scope) |
 | `HERALD_GITHUB_TOKEN` | GitHub token that Herald passes to `gh`. If it's empty, Herald uses `GH_TOKEN` from the environment. |
 | `HERALD_REPOS` | Default for `--repos` |
-| `HERALD_DEFAULT_MODEL` | Claude model for drafting (default: `claude-sonnet-4-20250514`) |
+| `HERALD_DEFAULT_MODEL` | Claude model for drafting (default: `claude-sonnet-5-5`). `--model` overrides it for one run. |
 | `HERALD_LOOKBACK_DAYS` | Default for `--days` (default: 7) |
 | `HERALD_DRY_RUN` | Set to `true` to preview without posting |
 | `HERALD_POST_LEDGER` | Ledger file for `herald post` (required for a live post) |
@@ -186,7 +186,8 @@ herald publish --use-consilium --repos owner/repo --dry-run
 ```
 
 consilium reads `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from the environment
-only, not from `.env`.
+only, not from `.env`. Its Claude model is `claude-sonnet-4-6`, and
+`HERALD_DEFAULT_MODEL` and `--model` don't change it.
 
 ## Writing guide
 

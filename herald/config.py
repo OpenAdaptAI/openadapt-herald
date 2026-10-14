@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import os
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The one place the default drafting model is named. Use an alias without a
+# date suffix: the dated Sonnet 4 snapshot used before started returning 404
+# and stopped the weekly digest. Override it with HERALD_DEFAULT_MODEL or
+# --model.
+DEFAULT_MODEL = "claude-sonnet-5-5"
 
 
 class HeraldSettings(BaseSettings):
@@ -32,7 +38,13 @@ class HeraldSettings(BaseSettings):
             self.github_token = os.environ.get("GH_TOKEN", "")
         return self
     openai_api_key: str = ""
-    default_model: str = "claude-sonnet-4-20250514"
+    default_model: str = DEFAULT_MODEL
+
+    @field_validator("default_model")
+    @classmethod
+    def _blank_model_means_default(cls, value: str) -> str:
+        """An empty HERALD_DEFAULT_MODEL (an unset workflow variable) keeps the default."""
+        return value.strip() or DEFAULT_MODEL
 
     # Discord
     discord_webhook_url: str = ""

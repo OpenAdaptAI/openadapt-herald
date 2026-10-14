@@ -51,8 +51,8 @@ def _draft(settings, artifacts_list, *, content_type, model, project_context, us
     """Draft posts, and stop with a plain message if the model call fails."""
     import anthropic
 
+    from herald.composer import ComposeError, compose_with_consilium
     from herald.composer import compose as compose_content
-    from herald.composer import compose_with_consilium
 
     model = model or settings.default_model
     try:
@@ -83,6 +83,8 @@ def _draft(settings, artifacts_list, *, content_type, model, project_context, us
         )
     except anthropic.APIError as exc:
         _fail(f"The Anthropic API call failed: {exc.message}")
+    except ComposeError as exc:
+        _fail(str(exc))
 
 
 _NOTHING_FOUND_HINT = (

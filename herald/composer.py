@@ -9,8 +9,21 @@ from typing import Literal
 import anthropic
 
 from herald.collector import Artifacts
+from herald.config import get_settings
 
 ContentType = Literal["release", "digest", "spotlight", "introduction"]
+
+# Thinking counts toward max_tokens, and current models think by default.
+_MAX_TOKENS = 16000
+
+# consilium reads the first block of a reply as its text, so it can't use a
+# model that starts its reply with a thinking block. Keep its Claude seat on a
+# model that doesn't think unless asked.
+COUNCIL_CLAUDE_MODEL = "claude-sonnet-4-6"
+
+
+class ComposeError(RuntimeError):
+    """The model answered without any draft text."""
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -73,14 +86,16 @@ def compose(
     artifacts_list: list[Artifacts],
     content_type: ContentType = "release",
     api_key: str = "",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "",
     project_context: str = "",
     extra_instructions: str = "",
 ) -> dict:
     """Generate social media content from artifacts using an LLM.
 
+    Without ``model``, uses the ``default_model`` setting (HERALD_DEFAULT_MODEL).
     Returns a dict with keys like "discord", "twitter", "summary".
     """
+    model = model or get_settings().default_model
     system_prompt = _build_system_prompt(content_type, project_context)
     user_message = _format_artifacts_for_prompt(artifacts_list)
 
@@ -90,13 +105,20 @@ def compose(
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=_MAX_TOKENS,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
 
-    # Extract the text content
-    text = response.content[0].text
+    # Read blocks by type: the reply can start with a thinking block.
+    text = "".join(
+        block.text for block in response.content if getattr(block, "type", None) == "text"
+    )
+    if not text.strip():
+        raise ComposeError(
+            f"The model returned no text (stop reason: {response.stop_reason}). "
+            "Nothing was drafted."
+        )
 
     # Try to parse as JSON (the prompts ask for JSON output)
     try:
@@ -142,8 +164,8 @@ def compose_with_consilium(
         user_message += f"\n\nAdditional instructions: {extra_instructions}"
 
     council = Council(
-        models=["claude-sonnet-4-20250514", "gpt-4o"],
-        chairman="claude-sonnet-4-20250514",
+        models=[COUNCIL_CLAUDE_MODEL, "gpt-4o"],
+        chairman=COUNCIL_CLAUDE_MODEL,
     )
     result = council.ask(
         user_message,

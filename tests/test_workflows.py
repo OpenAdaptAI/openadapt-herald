@@ -119,3 +119,12 @@ def test_publish_step_passes_dry_run_to_herald():
     assert re.search(
         r"HERALD_DRY_RUN:\s*\$\{\{\s*inputs\.dry_run\s*&&\s*'true'\s*\|\|\s*'false'\s*\}\}", step
     )
+
+
+def test_publish_step_lets_a_repository_variable_set_the_model():
+    # The digest died on a retired model id. A repository variable lets the
+    # operator change the model without a code change.
+    step = _publish_step(RELEASE_ANNOUNCE.read_text())
+    assert re.search(
+        r"HERALD_DEFAULT_MODEL:\s*\$\{\{\s*vars\.HERALD_DEFAULT_MODEL\s*\}\}", step
+    ), "pass HERALD_DEFAULT_MODEL from the repository variables to `herald publish`"
