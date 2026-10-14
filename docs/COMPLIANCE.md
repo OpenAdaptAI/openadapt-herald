@@ -1,7 +1,7 @@
 # Compliance and repository status
 
 This page collects the platform terms, data handling, and repository status
-that matter before you run herald against real accounts.
+that matter before you run Herald against real accounts.
 
 ## Platform terms
 
@@ -53,7 +53,7 @@ those providers.
 `herald collect` and `herald post` don't call a model. `herald post` sends
 only the approved text to X.
 
-## Records herald keeps
+## Records Herald keeps
 
 `herald post` keeps an append-only JSON Lines ledger so a later run doesn't
 post the same text twice. Each record holds the text's SHA-256 (not the text
@@ -63,8 +63,8 @@ works. The other commands keep no records.
 
 ## Repository status
 
-Herald is internal tooling the OpenAdapt team uses for release announcements.
-It isn't part of the OpenAdapt product, and no OpenAdapt package depends on
+The OpenAdapt team built Herald for its own announcements. It isn't part of
+the OpenAdapt product, and no OpenAdapt package depends on
 it. The product is the demonstration compiler
 [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow), installed
 with `pip install openadapt` from the

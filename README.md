@@ -1,12 +1,13 @@
-# herald
+# Herald
 
 Herald drafts release announcements and weekly digests from your git history
 and posts them to Discord, X, and LinkedIn. It reads commits, GitHub releases,
-and merged pull requests, asks Claude for a draft for each platform, and shows
-you the drafts before anything is posted.
+and merged pull requests, and asks Claude for one draft per platform.
+`herald preview` only prints the drafts. `herald publish` drafts and posts in
+one step, without asking first.
 
 It's for maintainers who want to announce what shipped without writing every
-post by hand. The OpenAdapt team uses it to announce OpenAdapt releases, and it
+post by hand. The OpenAdapt team built it for its own announcements, and it
 works with any git repository.
 
 ## Quick start
@@ -18,7 +19,7 @@ GitHub:
 pip install "git+https://github.com/OpenAdaptAI/openadapt-herald.git"
 ```
 
-From inside any git checkout, list what herald would write about. This step
+From inside any git checkout, list what Herald would write about. This step
 needs no keys:
 
 ```bash
@@ -39,7 +40,7 @@ then run `publish` with `--dry-run` first to see what it would send:
 herald publish --repos . --days 30 --content-type digest --dry-run
 ```
 
-## What herald reads
+## What Herald reads
 
 `--repos` takes a comma-separated list. Each entry is one of:
 
@@ -49,7 +50,7 @@ herald publish --repos . --days 30 --content-type digest --dry-run
   the [GitHub CLI](https://cli.github.com/) (`gh`), so `gh` must be installed
   and either signed in or given a token through `HERALD_GITHUB_TOKEN`.
 
-`--days` sets how far back to look. Without it, herald uses
+`--days` sets how far back to look. Without it, Herald uses
 `HERALD_LOOKBACK_DAYS`, which defaults to 7.
 
 ## How it works
@@ -103,7 +104,7 @@ Before sending, it checks that:
 - The text's SHA-256 matches `--expect-sha256`, so an edit after approval
   stops the post. To get the hash, run
   `herald post --file approved.txt --dry-run --json` and copy `content_sha256`.
-- The text fits X's 280 weighted characters. Like X, herald counts a link as
+- The text fits X's 280 weighted characters. Like X, Herald counts a link as
   23 characters and most CJK characters and emoji as 2.
 - The ledger, an append-only JSON Lines file, has no record that this text was
   already posted.
@@ -131,14 +132,14 @@ to `.env`.
 
 | Variable | Description |
 |----------|-------------|
-| `HERALD_ANTHROPIC_API_KEY` | Anthropic API key for drafting. If it's empty, herald uses `ANTHROPIC_API_KEY` from the environment. |
+| `HERALD_ANTHROPIC_API_KEY` | Anthropic API key for drafting. If it's empty, Herald uses `ANTHROPIC_API_KEY` from the environment. |
 | `HERALD_DISCORD_WEBHOOK_URL` | Discord webhook URL |
 | `HERALD_TWITTER_CONSUMER_KEY` | X API consumer key |
 | `HERALD_TWITTER_CONSUMER_SECRET` | X API consumer secret |
 | `HERALD_TWITTER_ACCESS_TOKEN` | X API access token |
 | `HERALD_TWITTER_ACCESS_TOKEN_SECRET` | X API access token secret |
 | `HERALD_LINKEDIN_ACCESS_TOKEN` | LinkedIn OAuth2 access token (`w_member_social` scope) |
-| `HERALD_GITHUB_TOKEN` | GitHub token that herald passes to `gh`. If it's empty, herald uses `GH_TOKEN` from the environment. |
+| `HERALD_GITHUB_TOKEN` | GitHub token that Herald passes to `gh`. If it's empty, Herald uses `GH_TOKEN` from the environment. |
 | `HERALD_REPOS` | Default for `--repos` |
 | `HERALD_DEFAULT_MODEL` | Claude model for drafting (default: `claude-sonnet-4-20250514`) |
 | `HERALD_LOOKBACK_DAYS` | Default for `--days` (default: 7) |
@@ -174,10 +175,9 @@ OpenAdapt repositories in `HERALD_REPOS`; change that list if you copy it.
 
 ## Drafts from several models (optional)
 
-With the `consilium` extra, herald drafts through
-[consilium](https://github.com/OpenAdaptAI/openadapt-consilium): Claude and
-GPT-4o each write a draft, review each other's drafts, and Claude combines
-them into one.
+With the `consilium` extra, Herald sends the same prompt to Claude and GPT-4o
+through [consilium](https://github.com/OpenAdaptAI/openadapt-consilium) and
+uses the longer of the two drafts.
 
 ```bash
 pip install "herald-announce[consilium] @ git+https://github.com/OpenAdaptAI/openadapt-herald.git"
@@ -212,10 +212,14 @@ and the research listed at the end of the guide.
 - `herald post` counts an emoji joined with a zero-width joiner or a
   skin-tone modifier as longer than X does, so it refuses some posts that X
   would accept.
+- With `--use-consilium`, both models also review the drafts, but the reviews
+  go unused. Herald caps consilium at $0.10 per run by consilium's cost
+  estimate, the drafts and reviews reach that cap, and consilium then skips
+  the step that combines the drafts.
 - Reading recent posts and creating a post are paid calls on X's pay-per-use
   plans.
 
-Platform terms, the data herald sends to model providers, and this
+Platform terms, the data Herald sends to model providers, and this
 repository's status are in
 [docs/COMPLIANCE.md](https://github.com/OpenAdaptAI/openadapt-herald/blob/main/docs/COMPLIANCE.md).
 

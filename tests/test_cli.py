@@ -155,3 +155,85 @@ class TestMissingAnthropicKey:
         result = runner.invoke(app, ["preview", "--repos", "org/repo"])
         assert result.exit_code == 0
         assert "Hello from the digest" in result.output
+
+
+def _api_error(cls, status: int, message: str):
+    import anthropic
+    import httpx
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(status, request=request)
+    assert issubclass(cls, anthropic.APIStatusError)
+    return cls(message, response=response, body=None)
+
+
+class TestModelCallErrors:
+    def _settings(self, **extra):
+        return MagicMock(
+            github_token="", has_anthropic=True, use_consilium=False, lookback_days=7,
+            anthropic_api_key="sk-ant-wrong", default_model="claude-sonnet-4-20250514",
+            **extra,
+        )
+
+    def _artifacts(self):
+        from herald.collector import Artifacts, Commit
+        return [Artifacts(
+            repo_name="repo",
+            commits=[Commit("abc", "Alice", "2026-01-01", "feat: thing")],
+        )]
+
+    @patch("herald.composer.compose")
+    @patch("herald.cli._get_settings")
+    @patch("herald.collector.collect_all")
+    def test_rejected_key_prints_one_line(self, mock_collect, mock_settings, mock_compose):
+        import anthropic
+
+        mock_settings.return_value = self._settings()
+        mock_collect.return_value = self._artifacts()
+        mock_compose.side_effect = _api_error(
+            anthropic.AuthenticationError, 401, "invalid x-api-key"
+        )
+        result = runner.invoke(app, ["preview", "--repos", "."])
+        assert result.exit_code == 1
+        assert "Anthropic rejected the API key" in result.output
+        assert "Traceback" not in result.output
+        assert not isinstance(result.exception, anthropic.APIError)
+
+    @patch("herald.composer.compose")
+    @patch("herald.cli._get_settings")
+    @patch("herald.collector.collect_all")
+    def test_unknown_model_names_the_setting(self, mock_collect, mock_settings, mock_compose):
+        import anthropic
+
+        mock_settings.return_value = self._settings()
+        mock_collect.return_value = self._artifacts()
+        mock_compose.side_effect = _api_error(anthropic.NotFoundError, 404, "model: gone")
+        result = runner.invoke(app, ["publish", "--repos", ".", "--dry-run"])
+        assert result.exit_code == 1
+        assert "claude-sonnet-4-20250514" in result.output
+        assert "HERALD_DEFAULT_MODEL" in result.output
+
+    @patch("herald.composer.compose_with_consilium")
+    @patch("herald.cli._get_settings")
+    @patch("herald.collector.collect_all")
+    def test_consilium_needs_environment_keys(
+        self, mock_collect, mock_settings, mock_council, monkeypatch
+    ):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        mock_settings.return_value = self._settings()
+        mock_collect.return_value = self._artifacts()
+        result = runner.invoke(app, ["compose", "--repos", ".", "--use-consilium"])
+        assert result.exit_code == 1
+        assert "ANTHROPIC_API_KEY" in result.output
+        mock_council.assert_not_called()
+
+    @patch("herald.cli._get_settings")
+    @patch("herald.collector.collect_all")
+    def test_nothing_found_says_what_to_check(self, mock_collect, mock_settings):
+        mock_settings.return_value = self._settings()
+        mock_collect.return_value = []
+        result = runner.invoke(app, ["preview", "--repos", ".", "--days", "30"])
+        assert result.exit_code == 0
+        assert "last 30 days" in result.output
+        assert "inside a git checkout" in result.output

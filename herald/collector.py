@@ -127,12 +127,11 @@ def collect_github_releases(
     since_days: int = 7,
     github_token: str = "",
 ) -> list[Release]:
-    """Collect releases from a GitHub repo via gh CLI."""
-    cmd = [
-        "gh", "api",
-        f"repos/{repo}/releases",
-        "--jq", ".[].tag_name + \"|\" + .name + \"|\" + .body + \"|\" + .published_at",
-    ]
+    """Collect published releases from a GitHub repo via gh CLI.
+
+    Drafts have no publish date, so they're skipped.
+    """
+    cmd = ["gh", "api", f"repos/{repo}/releases"]
     env_additions = {}
     if github_token:
         env_additions["GH_TOKEN"] = github_token
@@ -146,27 +145,34 @@ def collect_github_releases(
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return []
 
+    # Parse the JSON rather than one line per release: release notes span
+    # many lines and can contain any separator.
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
     releases = []
-    for line in result.stdout.strip().split("\n"):
-        if not line:
+    for item in data:
+        published = item.get("published_at") or ""
+        if not published:
             continue
-        parts = line.split("|", 3)
-        if len(parts) >= 4:
-            published = parts[3]
-            try:
-                pub_dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                if pub_dt < cutoff:
-                    continue
-            except ValueError:
-                pass
-            releases.append(Release(
-                tag=parts[0],
-                name=parts[1],
-                body=parts[2],
-                published_at=published,
-                repo=repo,
-            ))
+        try:
+            pub_dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            if pub_dt < cutoff:
+                continue
+        except ValueError:
+            pass
+        releases.append(Release(
+            tag=item.get("tag_name") or "",
+            name=item.get("name") or "",
+            body=item.get("body") or "",
+            published_at=published,
+            repo=repo,
+        ))
     return releases
 
 
@@ -227,6 +233,25 @@ def collect_github_prs(
     return prs
 
 
+def _git_root(path: Path) -> Path | None:
+    """Return the top folder of the git checkout that contains path, if any."""
+    try:
+        path = path.expanduser().resolve()
+    except OSError:
+        return None
+    if not path.exists():
+        return None
+    for candidate in (path, *path.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _looks_like_github_repo(repo: str) -> bool:
+    """True for "owner/repo"; false for paths such as "/x", "./x" or "../x"."""
+    return "/" in repo and not repo.startswith(("/", ".", "~"))
+
+
 def collect_all(
     repos: list[str],
     since_days: int = 7,
@@ -237,12 +262,14 @@ def collect_all(
 
     Each repo can be:
     - A GitHub "owner/repo" string (fetches releases + PRs via API)
-    - A local path (fetches git commits)
+    - A local path inside a git checkout (fetches git commits). The artifacts
+      are named after the checkout's folder, so "." gets a real name.
     """
     all_artifacts = []
 
     for repo in repos:
         artifacts = Artifacts(repo_name=repo)
+        is_github = _looks_like_github_repo(repo)
 
         # Check if it's a local path
         repo_path = Path(repo)
@@ -252,11 +279,18 @@ def collect_all(
             if candidate.exists():
                 repo_path = candidate
 
-        if repo_path.exists() and (repo_path / ".git").exists():
-            artifacts.commits = collect_git_commits(repo_path, since_days=since_days)
+        if is_github:
+            # Only a clone found under local_base, never an enclosing checkout.
+            root = repo_path if (repo_path / ".git").exists() else None
+        else:
+            root = _git_root(repo_path)
+        if root is not None:
+            artifacts.commits = collect_git_commits(root, since_days=since_days)
+            if not is_github:
+                artifacts.repo_name = root.name
 
         # If it looks like owner/repo, try GitHub API
-        if "/" in repo and not repo.startswith("/"):
+        if is_github:
             artifacts.releases = collect_github_releases(
                 repo, since_days=since_days, github_token=github_token
             )
