@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -19,16 +21,30 @@ def _get_settings(**overrides):
     return get_settings(**overrides)
 
 
+def _require_anthropic_key(settings, use_consilium: bool) -> None:
+    """Stop with a clear message when drafting needs a key that isn't set."""
+    if use_consilium or settings.has_anthropic:
+        return
+    console.print(
+        "[red]No Anthropic API key. Set HERALD_ANTHROPIC_API_KEY (environment or .env) "
+        "or ANTHROPIC_API_KEY (environment).[/red]"
+    )
+    raise typer.Exit(1)
+
+
 @app.command()
 def collect(
     repos: str = typer.Option("", help="Comma-separated repos (owner/repo or local paths)"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     github_token: str = typer.Option("", envvar="HERALD_GITHUB_TOKEN", help="GitHub token"),
 ):
     """Collect artifacts from repos and display them."""
     from herald.collector import collect_all
 
     settings = _get_settings()
+    days = settings.lookback_days if days is None else days
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
     if not repo_list:
@@ -39,7 +55,7 @@ def collect(
     artifacts_list = collect_all(repo_list, since_days=days, github_token=token)
 
     if not artifacts_list:
-        console.print("[yellow]No artifacts found in the last {days} days.[/yellow]")
+        console.print(f"[yellow]No artifacts found in the last {days} days.[/yellow]")
         raise typer.Exit(0)
 
     for artifacts in artifacts_list:
@@ -58,7 +74,9 @@ def collect(
 @app.command()
 def compose(
     repos: str = typer.Option("", help="Comma-separated repos"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),
@@ -70,6 +88,7 @@ def compose(
     from herald.composer import compose_with_consilium
 
     settings = _get_settings()
+    days = settings.lookback_days if days is None else days
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
     if not repo_list:
@@ -86,6 +105,7 @@ def compose(
         console.print("[yellow]No artifacts found.[/yellow]")
         raise typer.Exit(0)
 
+    _require_anthropic_key(settings, use_consilium or settings.use_consilium)
     console.print("[dim]Composing content...[/dim]")
 
     if use_consilium or settings.use_consilium:
@@ -110,7 +130,9 @@ def compose(
 @app.command()
 def publish(
     repos: str = typer.Option("", help="Comma-separated repos"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),
@@ -129,6 +151,7 @@ def publish(
     from herald.publisher import get_publishers, publish_content
 
     settings = _get_settings()
+    days = settings.lookback_days if days is None else days
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
     if not repo_list:
@@ -154,6 +177,7 @@ def publish(
     console.print(f"[green]Found {total} artifacts.[/green]")
 
     # Compose
+    _require_anthropic_key(settings, use_consilium or settings.use_consilium)
     console.print("[dim]Composing content...[/dim]")
     if use_consilium or settings.use_consilium:
         content = compose_with_consilium(
@@ -312,7 +336,9 @@ def post(
 @app.command()
 def preview(
     repos: str = typer.Option("", help="Comma-separated repos"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),

@@ -43,9 +43,6 @@ dev = [
     "ruff>=0.1.0",
 ]
 
-[tool.uv.sources]
-openadapt-consilium = { path = "../openadapt-consilium", editable = true }
-
 [tool.hatch.build.targets.wheel]
 packages = ["herald"]
 

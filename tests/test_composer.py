@@ -181,3 +181,46 @@ class TestCompose:
 
         call_args = mock_client.messages.create.call_args
         assert call_args[1]["model"] == "claude-opus-4-6"
+
+
+class TestComposeWithConsilium:
+    def test_uses_consilium_council(self, monkeypatch):
+        import sys
+        import types
+
+        from herald.composer import compose_with_consilium
+
+        calls = {}
+
+        class FakeCouncil:
+            def __init__(self, models=None, chairman=None):
+                calls["models"] = models
+                calls["chairman"] = chairman
+
+            def ask(self, prompt, system=None, budget=None):
+                calls["prompt"] = prompt
+                calls["system"] = system
+                return MagicMock(final_answer=json.dumps({"discord": "council draft"}))
+
+        fake = types.ModuleType("consilium")
+        fake.Council = FakeCouncil
+        monkeypatch.setitem(sys.modules, "consilium", fake)
+
+        artifacts = [Artifacts(
+            repo_name="test/repo",
+            commits=[Commit("abc", "Alice", "2026-01-01", "feat: X")],
+        )]
+        result = compose_with_consilium(artifacts, content_type="digest")
+        assert result == {"discord": "council draft"}
+        assert calls["models"] and calls["chairman"]
+        assert "feat: X" in calls["prompt"]
+        assert "Writing style guide" in calls["system"]
+
+    def test_missing_consilium_names_the_install_command(self, monkeypatch):
+        import sys
+
+        from herald.composer import compose_with_consilium
+
+        monkeypatch.setitem(sys.modules, "consilium", None)
+        with pytest.raises(ImportError, match=r"herald-announce\[consilium\]"):
+            compose_with_consilium([], content_type="digest")
