@@ -75,3 +75,16 @@ def test_readme_keeps_status_language_in_compliance_doc():
     links = re.findall(r"\]\([^)]*docs/COMPLIANCE\.md\)", text)
     assert len(links) == 1, "link docs/COMPLIANCE.md from the README exactly once"
     assert (ROOT / "docs" / "COMPLIANCE.md").exists()
+
+
+def test_readme_installs_from_github_until_herald_is_on_pypi():
+    # `pip install herald-announce` returned 404: the package isn't on PyPI.
+    installs = [
+        line.strip()
+        for block in _FENCE.findall(README.read_text())
+        for line in block.splitlines()
+        if "pip install" in line
+    ]
+    assert installs, "the README shows no install command"
+    for line in installs:
+        assert "git+https://github.com/OpenAdaptAI/openadapt-herald" in line, line

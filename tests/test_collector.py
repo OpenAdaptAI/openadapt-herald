@@ -152,6 +152,20 @@ class TestGitHubReleases:
         assert result == []
 
     @patch("herald.collector.subprocess.run")
+    def test_collect_releases_failure_says_why(self, mock_run, capsys):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="HTTP 401: Bad credentials\n"
+        )
+        assert collect_github_releases("owner/repo") == []
+        err = capsys.readouterr().err
+        assert "owner/repo" in err and "HTTP 401: Bad credentials" in err
+
+    @patch("herald.collector.subprocess.run", side_effect=FileNotFoundError("gh"))
+    def test_collect_prs_without_gh_says_so(self, mock_run, capsys):
+        assert collect_github_prs("owner/repo") == []
+        assert "gh" in capsys.readouterr().err
+
+    @patch("herald.collector.subprocess.run")
     def test_collect_releases_with_token(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         collect_github_releases("owner/repo", github_token="ghp_test123")

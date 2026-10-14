@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from herald.platforms.base import Publisher, PublishResult
+from herald.platforms.base import Publisher, PublishResult, shorten
+from herald.verbatim import X_MAX_WEIGHTED_LENGTH, x_weighted_length
 
 
 class TwitterPublisher(Publisher):
@@ -33,10 +34,10 @@ class TwitterPublisher(Publisher):
         ])
 
     def publish(self, content: str, **kwargs) -> PublishResult:
-        """Post a tweet. Content is truncated to 280 chars if needed."""
+        """Post a tweet, shortened at a word to X's 280 weighted characters if needed."""
         import tweepy
 
-        text = content[:280] if len(content) > 280 else content
+        text = shorten(content, X_MAX_WEIGHTED_LENGTH, measure=x_weighted_length)
 
         try:
             client = tweepy.Client(

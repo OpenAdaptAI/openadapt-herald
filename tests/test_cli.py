@@ -213,6 +213,26 @@ class TestModelCallErrors:
         assert "claude-sonnet-4-20250514" in result.output
         assert "HERALD_DEFAULT_MODEL" in result.output
 
+    @patch("herald.composer.anthropic.Anthropic")
+    @patch("herald.cli._get_settings")
+    @patch("herald.collector.collect_all")
+    def test_reply_without_text_prints_one_line(self, mock_collect, mock_settings, mock_anthropic):
+        # Current models think by default. A reply that holds only a thinking
+        # block used to end in an AttributeError from content[0].text.
+        from anthropic.types import ThinkingBlock
+
+        mock_settings.return_value = self._settings()
+        mock_collect.return_value = self._artifacts()
+        mock_anthropic.return_value.messages.create.return_value = MagicMock(
+            content=[ThinkingBlock(type="thinking", thinking="", signature="sig")],
+            stop_reason="end_turn",
+        )
+        result = runner.invoke(app, ["publish", "--repos", ".", "--dry-run"])
+        assert not isinstance(result.exception, AttributeError), result.exception
+        assert result.exit_code == 1
+        assert "returned no text" in result.output
+        assert "Traceback" not in result.output
+
     @patch("herald.composer.compose_with_consilium")
     @patch("herald.cli._get_settings")
     @patch("herald.collector.collect_all")

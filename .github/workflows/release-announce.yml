@@ -10,6 +10,9 @@ name: weekly-digest
 #   HERALD_TWITTER_CONSUMER_KEY, HERALD_TWITTER_CONSUMER_SECRET,
 #   HERALD_TWITTER_ACCESS_TOKEN, HERALD_TWITTER_ACCESS_TOKEN_SECRET
 #   HERALD_LINKEDIN_ACCESS_TOKEN
+#
+# Optional repository variable:
+#   HERALD_DEFAULT_MODEL       - Claude model for drafting. Unset uses herald's default.
 
 on:
   # Weekly digest every Monday at 3pm UTC
@@ -57,14 +60,33 @@ jobs:
 
       - name: Determine content type
         id: params
+        # Inputs reach the shell as quoted environment variables, never as
+        # script text, so a crafted `days` value can't run commands.
+        env:
+          INPUT_CONTENT_TYPE: ${{ inputs.content_type }}
+          INPUT_DAYS: ${{ inputs.days }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "type=digest" >> $GITHUB_OUTPUT
-            echo "days=7" >> $GITHUB_OUTPUT
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            type=digest
+            days=7
           else
-            echo "type=${{ inputs.content_type }}" >> $GITHUB_OUTPUT
-            echo "days=${{ inputs.days }}" >> $GITHUB_OUTPUT
+            type="$INPUT_CONTENT_TYPE"
+            days="$INPUT_DAYS"
           fi
+          case "$type" in
+            digest) title="Weekly digest" ;;
+            release) title="New release" ;;
+            spotlight) title="Feature spotlight" ;;
+            *) echo "::error::content_type must be digest, release or spotlight."; exit 1 ;;
+          esac
+          case "$days" in
+            ''|*[!0-9]*) echo "::error::days must be a whole number, such as 7."; exit 1 ;;
+          esac
+          {
+            echo "type=$type"
+            echo "days=$days"
+            echo "embed_title=$title"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish announcements
         env:
@@ -77,12 +99,18 @@ jobs:
           HERALD_LINKEDIN_ACCESS_TOKEN: ${{ secrets.HERALD_LINKEDIN_ACCESS_TOKEN }}
           HERALD_REPOS: "OpenAdaptAI/OpenAdapt,OpenAdaptAI/openadapt-evals,OpenAdaptAI/openadapt-ml"
           HERALD_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Empty when the variable isn't set, and herald then uses its default.
+          HERALD_DEFAULT_MODEL: ${{ vars.HERALD_DEFAULT_MODEL }}
           # inputs.dry_run is a boolean, so use it directly. Comparing it with the
           # string 'true' is always false. Scheduled runs have no inputs, so this is 'false'.
           HERALD_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          DRY_RUN_FLAG: ${{ inputs.dry_run && '--dry-run' || '' }}
+          CONTENT_TYPE: ${{ steps.params.outputs.type }}
+          DAYS: ${{ steps.params.outputs.days }}
+          EMBED_TITLE: ${{ steps.params.outputs.embed_title }}
         run: |
           herald publish \
-            --content-type ${{ steps.params.outputs.type }} \
-            --days ${{ steps.params.outputs.days }} \
-            --embed-title "Weekly Digest" \
-            ${{ inputs.dry_run && '--dry-run' || '' }}
+            --content-type "$CONTENT_TYPE" \
+            --days "$DAYS" \
+            --embed-title "$EMBED_TITLE" \
+            ${DRY_RUN_FLAG:+"$DRY_RUN_FLAG"}
