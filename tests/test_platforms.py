@@ -180,6 +180,21 @@ class TestTwitterPublisher:
         assert mock_client.create_tweet.call_args[1]["text"] == text
 
     @patch("tweepy.Client")
+    def test_publish_counts_an_ellipsis_after_a_link(self, mock_client_cls):
+        # X ends the link before the ellipsis: 23 for the link, 2 for the
+        # ellipsis. Counting the ellipsis as part of the link sent 281.
+        mock_client = mock_client_cls.return_value
+        mock_client.create_tweet.return_value = MagicMock(data={"id": "1"})
+        text = "a" * 255 + " https://github.com/OpenAdaptAI/openadapt-herald and more words"
+
+        TwitterPublisher("ck", "cs", "at", "ats").publish(text)
+
+        sent = mock_client.create_tweet.call_args[1]["text"]
+        kept = sent.removesuffix("…")
+        assert sent.endswith("…") and text.startswith(kept)
+        assert x_weighted_length(kept) + 2 <= 280
+
+    @patch("tweepy.Client")
     def test_publish_handles_error(self, mock_client_cls):
         mock_client = MagicMock()
         mock_client.create_tweet.side_effect = Exception("Rate limited")

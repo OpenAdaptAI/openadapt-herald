@@ -70,7 +70,9 @@ _BARE_DOMAIN = (
 )
 URL_RE = re.compile(f"{_EXPLICIT_URL}|{_BARE_DOMAIN}", re.IGNORECASE)
 _EXPLICIT_URL_RE = re.compile(_EXPLICIT_URL, re.IGNORECASE)
-_TRAILING_PUNCTUATION = ".,;:!?)]}'\""
+# X ends a link before these. U+2026 (…) is here because `herald publish`
+# adds one when it shortens a draft, and X counts it as 2 after a link.
+_TRAILING_PUNCTUATION = ".,;:!?)]}'\"…"
 
 EXIT_CODES = {"published": 0, "not_sent": 3, "uncertain": 4}
 

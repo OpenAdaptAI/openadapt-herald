@@ -91,6 +91,12 @@ class TestWeightedLength:
     def test_trailing_period_is_not_part_of_link(self):
         assert x_weighted_length("see https://openadapt.ai.") == len("see ") + 23 + 1
 
+    def test_ellipsis_after_a_link_is_not_part_of_it(self):
+        # X ends a link before U+2026 and counts the ellipsis as 2. `herald
+        # publish` adds one when it shortens a draft that ends in a link.
+        assert x_weighted_length("see https://openadapt.ai/x…") == len("see ") + 23 + 2
+        assert x_weighted_length("see openadapt.ai/x…") == len("see ") + 23 + 2
+
     def test_cjk_counts_two(self):
         assert x_weighted_length("日本") == 4
 
