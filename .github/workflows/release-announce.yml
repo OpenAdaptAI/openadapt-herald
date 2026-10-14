@@ -60,14 +60,28 @@ jobs:
 
       - name: Determine content type
         id: params
+        # Inputs reach the shell as quoted environment variables, never as
+        # script text, so a crafted `days` value can't run commands.
+        env:
+          INPUT_CONTENT_TYPE: ${{ inputs.content_type }}
+          INPUT_DAYS: ${{ inputs.days }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "type=digest" >> $GITHUB_OUTPUT
-            echo "days=7" >> $GITHUB_OUTPUT
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            type=digest
+            days=7
           else
-            echo "type=${{ inputs.content_type }}" >> $GITHUB_OUTPUT
-            echo "days=${{ inputs.days }}" >> $GITHUB_OUTPUT
+            type="$INPUT_CONTENT_TYPE"
+            days="$INPUT_DAYS"
           fi
+          case "$type" in
+            digest|release|spotlight) ;;
+            *) echo "::error::content_type must be digest, release or spotlight."; exit 1 ;;
+          esac
+          case "$days" in
+            ''|*[!0-9]*) echo "::error::days must be a whole number, such as 7."; exit 1 ;;
+          esac
+          echo "type=$type" >> "$GITHUB_OUTPUT"
+          echo "days=$days" >> "$GITHUB_OUTPUT"
 
       - name: Publish announcements
         env:
@@ -85,9 +99,12 @@ jobs:
           # inputs.dry_run is a boolean, so use it directly. Comparing it with the
           # string 'true' is always false. Scheduled runs have no inputs, so this is 'false'.
           HERALD_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          DRY_RUN_FLAG: ${{ inputs.dry_run && '--dry-run' || '' }}
+          CONTENT_TYPE: ${{ steps.params.outputs.type }}
+          DAYS: ${{ steps.params.outputs.days }}
         run: |
           herald publish \
-            --content-type ${{ steps.params.outputs.type }} \
-            --days ${{ steps.params.outputs.days }} \
+            --content-type "$CONTENT_TYPE" \
+            --days "$DAYS" \
             --embed-title "Weekly Digest" \
-            ${{ inputs.dry_run && '--dry-run' || '' }}
+            ${DRY_RUN_FLAG:+"$DRY_RUN_FLAG"}
