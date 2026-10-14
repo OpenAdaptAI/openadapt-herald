@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import NoReturn, Optional
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -19,16 +21,89 @@ def _get_settings(**overrides):
     return get_settings(**overrides)
 
 
+def _fail(message: str) -> NoReturn:
+    console.print(f"[red]{message}[/red]")
+    raise typer.Exit(1)
+
+
+def _require_anthropic_key(settings, use_consilium: bool) -> None:
+    """Stop with a clear message when drafting needs a key that isn't set."""
+    if use_consilium:
+        import os
+
+        # consilium reads its keys from the process environment only.
+        missing = [k for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY") if not os.environ.get(k)]
+        if missing:
+            _fail(
+                f"--use-consilium needs {' and '.join(missing)} in the environment. "
+                "consilium doesn't read .env or HERALD_* names."
+            )
+        return
+    if settings.has_anthropic:
+        return
+    _fail(
+        "No Anthropic API key. Set HERALD_ANTHROPIC_API_KEY (environment or .env) "
+        "or ANTHROPIC_API_KEY (environment)."
+    )
+
+
+def _draft(settings, artifacts_list, *, content_type, model, project_context, use_consilium):
+    """Draft posts, and stop with a plain message if the model call fails."""
+    import anthropic
+
+    from herald.composer import compose as compose_content
+    from herald.composer import compose_with_consilium
+
+    model = model or settings.default_model
+    try:
+        if use_consilium:
+            return compose_with_consilium(
+                artifacts_list,
+                content_type=content_type,
+                project_context=project_context,
+            )
+        return compose_content(
+            artifacts_list,
+            content_type=content_type,
+            api_key=settings.anthropic_api_key,
+            model=model,
+            project_context=project_context,
+        )
+    except anthropic.AuthenticationError:
+        _fail(
+            "Anthropic rejected the API key. Check HERALD_ANTHROPIC_API_KEY "
+            "or ANTHROPIC_API_KEY."
+        )
+    except anthropic.NotFoundError as exc:
+        if use_consilium:
+            _fail(f"The Anthropic API call failed: {exc.message}")
+        _fail(
+            f"Anthropic returned 404 for model {model!r}: {exc.message}. "
+            "Pass --model or set HERALD_DEFAULT_MODEL."
+        )
+    except anthropic.APIError as exc:
+        _fail(f"The Anthropic API call failed: {exc.message}")
+
+
+_NOTHING_FOUND_HINT = (
+    "A local path must be inside a git checkout. An owner/repo needs the gh CLI, "
+    "signed in or given HERALD_GITHUB_TOKEN."
+)
+
+
 @app.command()
 def collect(
     repos: str = typer.Option("", help="Comma-separated repos (owner/repo or local paths)"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     github_token: str = typer.Option("", envvar="HERALD_GITHUB_TOKEN", help="GitHub token"),
 ):
     """Collect artifacts from repos and display them."""
     from herald.collector import collect_all
 
     settings = _get_settings()
+    days = settings.lookback_days if days is None else days
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
     if not repo_list:
@@ -39,7 +114,8 @@ def collect(
     artifacts_list = collect_all(repo_list, since_days=days, github_token=token)
 
     if not artifacts_list:
-        console.print("[yellow]No artifacts found in the last {days} days.[/yellow]")
+        console.print(f"[yellow]No artifacts found in the last {days} days.[/yellow]")
+        console.print(f"[dim]{_NOTHING_FOUND_HINT}[/dim]")
         raise typer.Exit(0)
 
     for artifacts in artifacts_list:
@@ -58,7 +134,9 @@ def collect(
 @app.command()
 def compose(
     repos: str = typer.Option("", help="Comma-separated repos"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),
@@ -66,10 +144,9 @@ def compose(
 ):
     """Compose social media content from collected artifacts."""
     from herald.collector import collect_all
-    from herald.composer import compose as compose_content
-    from herald.composer import compose_with_consilium
 
     settings = _get_settings()
+    days = settings.lookback_days if days is None else days
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
     if not repo_list:
@@ -83,25 +160,21 @@ def compose(
     )
 
     if not artifacts_list:
-        console.print("[yellow]No artifacts found.[/yellow]")
+        console.print(f"[yellow]No artifacts found in the last {days} days.[/yellow]")
+        console.print(f"[dim]{_NOTHING_FOUND_HINT}[/dim]")
         raise typer.Exit(0)
 
+    use_consilium = use_consilium or settings.use_consilium
+    _require_anthropic_key(settings, use_consilium)
     console.print("[dim]Composing content...[/dim]")
-
-    if use_consilium or settings.use_consilium:
-        content = compose_with_consilium(
-            artifacts_list,
-            content_type=content_type,
-            project_context=project_context,
-        )
-    else:
-        content = compose_content(
-            artifacts_list,
-            content_type=content_type,
-            api_key=settings.anthropic_api_key,
-            model=model or settings.default_model,
-            project_context=project_context,
-        )
+    content = _draft(
+        settings,
+        artifacts_list,
+        content_type=content_type,
+        model=model,
+        project_context=project_context,
+        use_consilium=use_consilium,
+    )
 
     for platform, text in content.items():
         console.print(Panel(str(text), title=f"[bold]{platform}[/bold]"))
@@ -110,7 +183,9 @@ def compose(
 @app.command()
 def publish(
     repos: str = typer.Option("", help="Comma-separated repos"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),
@@ -124,11 +199,10 @@ def publish(
 ):
     """Collect, compose, and publish in one step."""
     from herald.collector import collect_all
-    from herald.composer import compose as compose_content
-    from herald.composer import compose_with_consilium
     from herald.publisher import get_publishers, publish_content
 
     settings = _get_settings()
+    days = settings.lookback_days if days is None else days
     repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else settings.repo_list
 
     if not repo_list:
@@ -144,7 +218,10 @@ def publish(
     )
 
     if not artifacts_list:
-        console.print("[yellow]No artifacts found. Nothing to publish.[/yellow]")
+        console.print(
+            f"[yellow]No artifacts found in the last {days} days. Nothing to publish.[/yellow]"
+        )
+        console.print(f"[dim]{_NOTHING_FOUND_HINT}[/dim]")
         raise typer.Exit(0)
 
     total = sum(
@@ -154,21 +231,17 @@ def publish(
     console.print(f"[green]Found {total} artifacts.[/green]")
 
     # Compose
+    use_consilium = use_consilium or settings.use_consilium
+    _require_anthropic_key(settings, use_consilium)
     console.print("[dim]Composing content...[/dim]")
-    if use_consilium or settings.use_consilium:
-        content = compose_with_consilium(
-            artifacts_list,
-            content_type=content_type,
-            project_context=project_context,
-        )
-    else:
-        content = compose_content(
-            artifacts_list,
-            content_type=content_type,
-            api_key=settings.anthropic_api_key,
-            model=model or settings.default_model,
-            project_context=project_context,
-        )
+    content = _draft(
+        settings,
+        artifacts_list,
+        content_type=content_type,
+        model=model,
+        project_context=project_context,
+        use_consilium=use_consilium,
+    )
 
     # Preview
     for platform, text in content.items():
@@ -312,7 +385,9 @@ def post(
 @app.command()
 def preview(
     repos: str = typer.Option("", help="Comma-separated repos"),
-    days: int = typer.Option(7, help="Look back this many days"),
+    days: Optional[int] = typer.Option(
+        None, help="Look back this many days (default: HERALD_LOOKBACK_DAYS, or 7)"
+    ),
     content_type: str = typer.Option("release", help="Content type: release, digest, spotlight"),
     model: str = typer.Option("", help="LLM model to use"),
     project_context: str = typer.Option("", help="Extra context about the project"),

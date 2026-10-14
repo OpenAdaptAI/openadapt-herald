@@ -75,15 +75,22 @@ class TestCommitCollection:
         assert result == []
 
 
+def _releases_json(*releases: dict) -> str:
+    """`gh api repos/{repo}/releases` output for the given releases."""
+    return json.dumps(list(releases))
+
+
 class TestGitHubReleases:
     @patch("herald.collector.subprocess.run")
     def test_collect_releases_parses_output(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=(
-                "v1.0.0|Release 1.0|Bug fixes and improvements"
-                f"|{_iso_days_ago(1)}\n"
-            ),
+            stdout=_releases_json({
+                "tag_name": "v1.0.0",
+                "name": "Release 1.0",
+                "body": "Bug fixes and improvements",
+                "published_at": _iso_days_ago(1),
+            }),
         )
         result = collect_github_releases("owner/repo", since_days=7)
         assert len(result) == 1
@@ -92,13 +99,51 @@ class TestGitHubReleases:
         assert result[0].repo == "owner/repo"
 
     @patch("herald.collector.subprocess.run")
+    def test_collect_releases_keeps_multiline_notes(self, mock_run):
+        # Real release notes span many lines and can contain "|"; a
+        # line-per-release parser dropped every such release.
+        notes = "## v2.0.0\n\n### Fixes\n\n- a | b\n- c"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=_releases_json(
+                {"tag_name": "v2.0.0", "name": "v2.0.0", "body": notes,
+                 "published_at": _iso_days_ago(1)},
+                {"tag_name": "v1.9.0", "name": None, "body": None,
+                 "published_at": _iso_days_ago(2)},
+            ),
+        )
+        result = collect_github_releases("owner/repo", since_days=7)
+        assert [r.tag for r in result] == ["v2.0.0", "v1.9.0"]
+        assert result[0].body == notes
+        assert result[1].name == ""
+        assert result[1].body == ""
+
+    @patch("herald.collector.subprocess.run")
+    def test_collect_releases_skips_drafts(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=_releases_json(
+                {"tag_name": "v3.0.0", "name": "draft", "body": "", "published_at": None},
+            ),
+        )
+        assert collect_github_releases("owner/repo", since_days=7) == []
+
+    @patch("herald.collector.subprocess.run")
     def test_collect_releases_filters_old(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="v0.1.0|Old|Old stuff|2020-01-01T00:00:00Z\n",
+            stdout=_releases_json({
+                "tag_name": "v0.1.0", "name": "Old", "body": "Old stuff",
+                "published_at": "2020-01-01T00:00:00Z",
+            }),
         )
         result = collect_github_releases("owner/repo", since_days=7)
         assert result == []
+
+    @patch("herald.collector.subprocess.run")
+    def test_collect_releases_bad_json(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="not json")
+        assert collect_github_releases("owner/repo") == []
 
     @patch("herald.collector.subprocess.run")
     def test_collect_releases_failure(self, mock_run):
@@ -218,6 +263,49 @@ class TestCollectAll:
 
         result = collect_all([str(repo_dir)], since_days=7)
         assert len(result) == 1
+        assert result[0].repo_name == "myrepo"
+
+    @patch("herald.collector.collect_github_prs")
+    @patch("herald.collector.collect_github_releases")
+    @patch("herald.collector.collect_git_commits")
+    def test_dot_is_named_after_the_checkout(
+        self, mock_commits, mock_releases, mock_prs, tmp_path, monkeypatch
+    ):
+        # `--repos .` used to reach the model as "Repository: .".
+        repo_dir = tmp_path / "myrepo"
+        (repo_dir / ".git").mkdir(parents=True)
+        monkeypatch.chdir(repo_dir)
+        mock_commits.return_value = [Commit("abc", "Alice", "2026-01-01", "fix: bug")]
+
+        result = collect_all(["."], since_days=7)
+        assert result[0].repo_name == "myrepo"
+        assert mock_commits.call_args[0][0] == repo_dir.resolve()
+        mock_releases.assert_not_called()
+        mock_prs.assert_not_called()
+
+    @patch("herald.collector.collect_git_commits")
+    def test_subdirectory_finds_the_checkout(self, mock_commits, tmp_path, monkeypatch):
+        repo_dir = tmp_path / "myrepo"
+        (repo_dir / ".git").mkdir(parents=True)
+        (repo_dir / "src" / "pkg").mkdir(parents=True)
+        monkeypatch.chdir(repo_dir / "src" / "pkg")
+        mock_commits.return_value = [Commit("abc", "Alice", "2026-01-01", "fix: bug")]
+
+        result = collect_all(["."], since_days=7)
+        assert result[0].repo_name == "myrepo"
+        assert mock_commits.call_args[0][0] == repo_dir.resolve()
+
+    @patch("herald.collector.collect_github_releases")
+    @patch("herald.collector.collect_git_commits")
+    def test_relative_path_is_not_a_github_repo(self, mock_commits, mock_releases, tmp_path):
+        repo_dir = tmp_path / "myrepo"
+        (repo_dir / ".git").mkdir(parents=True)
+        mock_commits.return_value = []
+        collect_all(["../myrepo", "./myrepo"], since_days=7)
+        mock_releases.assert_not_called()
+
+    def test_folder_outside_a_checkout_finds_nothing(self, tmp_path):
+        assert collect_all([str(tmp_path)], since_days=7) == []
 
     @patch("herald.collector.collect_github_prs")
     @patch("herald.collector.collect_github_releases")

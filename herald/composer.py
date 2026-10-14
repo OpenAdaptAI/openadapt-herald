@@ -124,14 +124,16 @@ def compose_with_consilium(
 ) -> dict:
     """Generate content using consilium's multi-model council for higher quality.
 
-    Requires consilium to be installed: pip install herald[consilium]
+    Requires the ``consilium`` extra (the ``openadapt-consilium`` package).
     """
     try:
-        from consilium import LLMCouncil
-    except ImportError:
+        from consilium import Council
+    except ImportError as exc:
         raise ImportError(
-            "consilium is not installed. Install with: pip install herald[consilium]"
-        )
+            "consilium is not installed. Install the extra with: "
+            "pip install 'herald-announce[consilium] @ "
+            "git+https://github.com/OpenAdaptAI/openadapt-herald.git'"
+        ) from exc
 
     system_prompt = _build_system_prompt(content_type, project_context)
     user_message = _format_artifacts_for_prompt(artifacts_list)
@@ -139,7 +141,7 @@ def compose_with_consilium(
     if extra_instructions:
         user_message += f"\n\nAdditional instructions: {extra_instructions}"
 
-    council = LLMCouncil(
+    council = Council(
         models=["claude-sonnet-4-20250514", "gpt-4o"],
         chairman="claude-sonnet-4-20250514",
     )

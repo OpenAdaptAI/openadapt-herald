@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "herald-announce"
 version = "0.1.0"
-description = "LLM-powered social media announcements from your git history"
+description = "Draft release announcements from your git history and post them to Discord, X, and LinkedIn"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -33,6 +33,11 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/OpenAdaptAI/openadapt-herald"
+Repository = "https://github.com/OpenAdaptAI/openadapt-herald"
+Issues = "https://github.com/OpenAdaptAI/openadapt-herald/issues"
+
 [project.optional-dependencies]
 consilium = [
     "openadapt-consilium",
@@ -42,9 +47,6 @@ dev = [
     "pytest-mock>=3.0",
     "ruff>=0.1.0",
 ]
-
-[tool.uv.sources]
-openadapt-consilium = { path = "../openadapt-consilium", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["herald"]
