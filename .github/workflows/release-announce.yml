@@ -77,9 +77,12 @@ jobs:
           HERALD_LINKEDIN_ACCESS_TOKEN: ${{ secrets.HERALD_LINKEDIN_ACCESS_TOKEN }}
           HERALD_REPOS: "OpenAdaptAI/OpenAdapt,OpenAdaptAI/openadapt-evals,OpenAdaptAI/openadapt-ml"
           HERALD_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # inputs.dry_run is a boolean, so use it directly. Comparing it with the
+          # string 'true' is always false. Scheduled runs have no inputs, so this is 'false'.
+          HERALD_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
         run: |
           herald publish \
             --content-type ${{ steps.params.outputs.type }} \
             --days ${{ steps.params.outputs.days }} \
             --embed-title "Weekly Digest" \
-            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}
+            ${{ inputs.dry_run && '--dry-run' || '' }}
