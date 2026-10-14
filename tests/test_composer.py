@@ -151,6 +151,21 @@ class TestCompose:
         assert "Just a plain text response" in result["discord"]
 
     @patch("herald.composer.anthropic.Anthropic")
+    def test_non_json_fallback_does_not_cut_mid_word(self, mock_anthropic_cls):
+        # The X publisher shortens to X's count; the fallback must not cut first.
+        reply = " ".join(f"word{i}" for i in range(80))
+        mock_anthropic_cls.return_value.messages.create.return_value = MagicMock(
+            content=[_text(reply)]
+        )
+
+        result = compose([Artifacts(commits=[Commit("a", "A", "2026-01-01", "fix")])], api_key="k")
+
+        assert result["twitter"] == reply
+        summary = result["summary"]
+        assert len(summary) <= 200 and summary.endswith("\u2026")
+        assert reply[len(summary.removesuffix("\u2026"))] == " "
+
+    @patch("herald.composer.anthropic.Anthropic")
     def test_compose_passes_extra_instructions(self, mock_anthropic_cls):
         mock_client = MagicMock()
         mock_anthropic_cls.return_value = mock_client

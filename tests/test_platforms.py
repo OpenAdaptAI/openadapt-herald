@@ -7,6 +7,7 @@ from herald.platforms.discord import DiscordPublisher
 from herald.platforms.linkedin import LinkedInPublisher
 from herald.platforms.twitter import TwitterPublisher
 from herald.publisher import PublishReport, get_publishers, publish_content
+from herald.verbatim import x_weighted_length
 
 
 class TestDiscordPublisher:
@@ -59,6 +60,19 @@ class TestDiscordPublisher:
         pub.publish(long_content)
 
         assert len(mock_webhook.content) == 2000
+
+    @patch("discord_webhook.DiscordWebhook")
+    def test_publish_cuts_long_content_at_a_word_boundary(self, mock_webhook_cls):
+        mock_webhook = mock_webhook_cls.return_value
+        mock_webhook.execute.return_value = MagicMock(status_code=200)
+        words = " ".join(f"word{i}" for i in range(500))
+
+        DiscordPublisher("https://discord.com/api/webhooks/123/abc").publish(words)
+
+        text = mock_webhook.content
+        assert len(text) <= 2000
+        kept = text.removesuffix("\u2026")
+        assert text.endswith("\u2026") and words[len(kept)] == " "
 
     @patch("discord_webhook.DiscordWebhook")
     def test_publish_handles_error(self, mock_webhook_cls):
@@ -123,8 +137,47 @@ class TestTwitterPublisher:
         long_text = "a" * 300
         pub.publish(long_text)
 
-        call_args = mock_client.create_tweet.call_args
-        assert len(call_args[1]["text"]) == 280
+        text = mock_client.create_tweet.call_args[1]["text"]
+        assert text.endswith("\u2026")
+        assert x_weighted_length(text) <= 280
+
+    @patch("tweepy.Client")
+    def test_publish_cuts_at_a_word_boundary(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_client.create_tweet.return_value = MagicMock(data={"id": "1"})
+        words = " ".join(f"word{i}" for i in range(60))
+
+        TwitterPublisher("ck", "cs", "at", "ats").publish(words)
+
+        text = mock_client.create_tweet.call_args[1]["text"]
+        assert text.endswith("\u2026")
+        assert x_weighted_length(text) <= 280
+        kept = text.removesuffix("\u2026")
+        assert words.startswith(kept) and words[len(kept)] == " "
+
+    @patch("tweepy.Client")
+    def test_publish_counts_cjk_as_x_does(self, mock_client_cls):
+        # 240 characters, but X counts each CJK character as 2: 420 in all.
+        mock_client = mock_client_cls.return_value
+        mock_client.create_tweet.return_value = MagicMock(data={"id": "1"})
+        text = "\u65e5\u672c\u8a9e " * 60
+
+        TwitterPublisher("ck", "cs", "at", "ats").publish(text)
+
+        sent = mock_client.create_tweet.call_args[1]["text"]
+        assert x_weighted_length(sent) <= 280
+        assert sent.endswith("\u2026")
+
+    @patch("tweepy.Client")
+    def test_publish_keeps_a_long_link_that_x_counts_as_23(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_client.create_tweet.return_value = MagicMock(data={"id": "1"})
+        text = "Notes: https://github.com/OpenAdaptAI/openadapt-herald/releases/" + "v" * 250
+        assert len(text) > 280 and x_weighted_length(text) <= 280
+
+        TwitterPublisher("ck", "cs", "at", "ats").publish(text)
+
+        assert mock_client.create_tweet.call_args[1]["text"] == text
 
     @patch("tweepy.Client")
     def test_publish_handles_error(self, mock_client_cls):
@@ -201,6 +254,26 @@ class TestLinkedInPublisher:
             "shareCommentary"
         ]["text"]
         assert len(text) == 3000
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_publish_cuts_long_content_at_a_word_boundary(self, mock_get, mock_post):
+        mock_get.return_value = MagicMock(
+            status_code=200, json=MagicMock(return_value={"sub": "abc123"})
+        )
+        mock_post.return_value = MagicMock(
+            status_code=201, json=MagicMock(return_value={"id": "urn:li:share:1"})
+        )
+        words = " ".join(f"word{i}" for i in range(700))
+
+        LinkedInPublisher("access-token-123").publish(words)
+
+        text = mock_post.call_args[1]["json"]["specificContent"][
+            "com.linkedin.ugc.ShareContent"
+        ]["shareCommentary"]["text"]
+        assert len(text) <= 3000
+        kept = text.removesuffix("\u2026")
+        assert text.endswith("\u2026") and words[len(kept)] == " "
 
     @patch("requests.post")
     @patch("requests.get")
@@ -362,3 +435,20 @@ class TestPublishContent:
         report = publish_content(content, [pub])
         assert not report.results[0].success
         assert "No content" in report.results[0].message
+
+
+class TestShorten:
+    def test_text_that_fits_is_unchanged(self):
+        from herald.platforms.base import shorten
+
+        assert shorten("short post", 280) == "short post"
+
+    def test_drops_a_trailing_comma_before_the_ellipsis(self):
+        from herald.platforms.base import shorten
+
+        assert shorten("one, two, three, four", 12) == "one, two…"
+
+    def test_one_long_word_is_cut_inside_the_word(self):
+        from herald.platforms.base import shorten
+
+        assert shorten("x" * 50, 10) == "x" * 9 + "…"

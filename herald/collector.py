@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -122,6 +124,32 @@ def collect_git_commits(
     return commits
 
 
+def _run_gh(cmd: list[str], what: str, github_token: str) -> str | None:
+    """Run a gh command and return its output, or None after printing why it failed.
+
+    A failure here would otherwise look like a repository with nothing new.
+    """
+    env = {**os.environ, "GH_TOKEN": github_token} if github_token else None
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+    except FileNotFoundError:
+        _warn(f"couldn't read {what}: the gh command isn't installed.")
+        return None
+    except subprocess.TimeoutExpired:
+        _warn(f"couldn't read {what}: gh didn't answer within 30 seconds.")
+        return None
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines() if isinstance(result.stderr, str) else []
+        reason = detail[-1] if detail else f"gh exited with code {result.returncode}"
+        _warn(f"couldn't read {what}: {reason}")
+        return None
+    return result.stdout
+
+
+def _warn(message: str) -> None:
+    print(f"herald: {message}", file=sys.stderr)
+
+
 def collect_github_releases(
     repo: str,
     since_days: int = 7,
@@ -131,25 +159,17 @@ def collect_github_releases(
 
     Drafts have no publish date, so they're skipped.
     """
-    cmd = ["gh", "api", f"repos/{repo}/releases"]
-    env_additions = {}
-    if github_token:
-        env_additions["GH_TOKEN"] = github_token
-
-    try:
-        import os
-        env = {**os.environ, **env_additions} if env_additions else None
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
-        if result.returncode != 0:
-            return []
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    what = f"releases for {repo}"
+    stdout = _run_gh(["gh", "api", f"repos/{repo}/releases"], what, github_token)
+    if stdout is None:
         return []
 
     # Parse the JSON rather than one line per release: release notes span
     # many lines and can contain any separator.
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(stdout)
     except json.JSONDecodeError:
+        _warn(f"couldn't read {what}: gh returned something other than JSON.")
         return []
     if not isinstance(data, list):
         return []
@@ -190,22 +210,15 @@ def collect_github_prs(
         "--limit", "50",
         "--json", "number,title,body,mergedAt,author",
     ]
-    env_additions = {}
-    if github_token:
-        env_additions["GH_TOKEN"] = github_token
-
-    try:
-        import os
-        env = {**os.environ, **env_additions} if env_additions else None
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
-        if result.returncode != 0:
-            return []
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    what = f"merged pull requests for {repo}"
+    stdout = _run_gh(cmd, what, github_token)
+    if stdout is None:
         return []
 
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(stdout)
     except json.JSONDecodeError:
+        _warn(f"couldn't read {what}: gh returned something other than JSON.")
         return []
 
     prs = []

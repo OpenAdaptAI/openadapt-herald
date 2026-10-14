@@ -74,14 +74,19 @@ jobs:
             days="$INPUT_DAYS"
           fi
           case "$type" in
-            digest|release|spotlight) ;;
+            digest) title="Weekly digest" ;;
+            release) title="New release" ;;
+            spotlight) title="Feature spotlight" ;;
             *) echo "::error::content_type must be digest, release or spotlight."; exit 1 ;;
           esac
           case "$days" in
             ''|*[!0-9]*) echo "::error::days must be a whole number, such as 7."; exit 1 ;;
           esac
-          echo "type=$type" >> "$GITHUB_OUTPUT"
-          echo "days=$days" >> "$GITHUB_OUTPUT"
+          {
+            echo "type=$type"
+            echo "days=$days"
+            echo "embed_title=$title"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish announcements
         env:
@@ -102,9 +107,10 @@ jobs:
           DRY_RUN_FLAG: ${{ inputs.dry_run && '--dry-run' || '' }}
           CONTENT_TYPE: ${{ steps.params.outputs.type }}
           DAYS: ${{ steps.params.outputs.days }}
+          EMBED_TITLE: ${{ steps.params.outputs.embed_title }}
         run: |
           herald publish \
             --content-type "$CONTENT_TYPE" \
             --days "$DAYS" \
-            --embed-title "Weekly Digest" \
+            --embed-title "$EMBED_TITLE" \
             ${DRY_RUN_FLAG:+"$DRY_RUN_FLAG"}

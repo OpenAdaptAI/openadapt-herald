@@ -203,8 +203,10 @@ and the research listed at the end of the guide.
 - Version 0.1.0. Herald isn't published to PyPI.
 - Drafts come from a model. Read them with `preview` or `--dry-run` before you
   post.
-- `herald publish` cuts X drafts at 280 plain characters. `herald post`
-  refuses text that's too long instead of cutting it.
+- When a draft is over a platform's limit, `herald publish` cuts it after the
+  last whole word that fits and adds an ellipsis (…). For X it counts
+  weighted characters, as `herald post` does. `herald post` refuses text
+  that's too long instead of cutting it.
 - LinkedIn's API terms (section 3.1) don't allow automated posting.
   `herald post` never posts to LinkedIn, but `herald publish` does when
   `HERALD_LINKEDIN_ACCESS_TOKEN` is set. Leave it unset unless your use is

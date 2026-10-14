@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from herald.platforms.base import Publisher, PublishResult
+from herald.platforms.base import Publisher, PublishResult, shorten
 
 
 class LinkedInPublisher(Publisher):
@@ -46,11 +46,7 @@ class LinkedInPublisher(Publisher):
         import requests
 
         visibility = kwargs.get("visibility", "PUBLIC")
-        text = (
-            content[: self.MAX_CONTENT_LENGTH]
-            if len(content) > self.MAX_CONTENT_LENGTH
-            else content
-        )
+        text = shorten(content, self.MAX_CONTENT_LENGTH)
 
         try:
             author_urn = self._get_user_urn()

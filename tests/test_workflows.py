@@ -268,10 +268,27 @@ def test_params_step_passes_valid_dispatch_inputs(tmp_path):
         INPUT_DAYS="30",
     )
     assert result.returncode == 0, result.stderr
-    assert outputs.splitlines() == ["type=release", "days=30"]
+    assert outputs.splitlines() == ["type=release", "days=30", "embed_title=New release"]
 
 
 def test_params_step_uses_digest_defaults_on_schedule(tmp_path):
     result, outputs = _run_params_step(tmp_path, GITHUB_EVENT_NAME="schedule")
     assert result.returncode == 0, result.stderr
-    assert outputs.splitlines() == ["type=digest", "days=7"]
+    assert outputs.splitlines() == ["type=digest", "days=7", "embed_title=Weekly digest"]
+
+
+def test_params_step_titles_a_spotlight(tmp_path):
+    result, outputs = _run_params_step(
+        tmp_path,
+        GITHUB_EVENT_NAME="workflow_dispatch",
+        INPUT_CONTENT_TYPE="spotlight",
+        INPUT_DAYS="7",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "embed_title=Feature spotlight" in outputs.splitlines()
+
+
+def test_publish_step_titles_the_embed_from_the_content_type():
+    step = _publish_step(RELEASE_ANNOUNCE.read_text())
+    assert re.search(r"EMBED_TITLE:\s*\$\{\{\s*steps\.params\.outputs\.embed_title\s*\}\}", step)
+    assert '--embed-title "$EMBED_TITLE"' in step

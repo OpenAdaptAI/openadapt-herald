@@ -10,6 +10,7 @@ import anthropic
 
 from herald.collector import Artifacts
 from herald.config import get_settings
+from herald.platforms.base import shorten
 
 ContentType = Literal["release", "digest", "spotlight", "introduction"]
 
@@ -67,6 +68,14 @@ def _build_system_prompt(content_type: ContentType, project_context: str = "") -
         ])
 
     return "\n".join(parts)
+
+
+def _plain_text_drafts(text: str) -> dict:
+    """Drafts for a reply that isn't JSON: the whole text, and a short summary.
+
+    Each publisher shortens its draft to its own limit, at a word boundary.
+    """
+    return {"discord": text, "twitter": text, "summary": shorten(text, 200)}
 
 
 def _format_artifacts_for_prompt(artifacts_list: list[Artifacts]) -> str:
@@ -129,12 +138,8 @@ def compose(
             text = text.split("```")[1].split("```")[0].strip()
         return json.loads(text)
     except (json.JSONDecodeError, IndexError):
-        # If JSON parsing fails, return the raw text as discord content
-        return {
-            "discord": text,
-            "twitter": text[:280] if len(text) > 280 else text,
-            "summary": text[:200] if len(text) > 200 else text,
-        }
+        # The reply isn't JSON: use the whole text as the draft.
+        return _plain_text_drafts(text)
 
 
 def compose_with_consilium(
@@ -182,8 +187,4 @@ def compose_with_consilium(
             text = text.split("```")[1].split("```")[0].strip()
         return json.loads(text)
     except (json.JSONDecodeError, IndexError):
-        return {
-            "discord": text,
-            "twitter": text[:280] if len(text) > 280 else text,
-            "summary": text[:200] if len(text) > 200 else text,
-        }
+        return _plain_text_drafts(text)

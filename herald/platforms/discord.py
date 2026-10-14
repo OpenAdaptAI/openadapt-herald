@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from herald.platforms.base import Publisher, PublishResult
+from herald.platforms.base import Publisher, PublishResult, shorten
 
 
 class DiscordPublisher(Publisher):
@@ -35,17 +35,16 @@ class DiscordPublisher(Publisher):
         webhook = DiscordWebhook(url=self._webhook_url, username=username)
 
         if embed_title:
-            # Truncate to Discord's 4096-char embed description limit
-            truncated = content[:4096] if len(content) > 4096 else content
+            # Discord's embed description limit is 4096 characters.
             embed = DiscordEmbed(
                 title=embed_title,
-                description=truncated,
+                description=shorten(content, 4096),
                 color=embed_color,
             )
             webhook.add_embed(embed)
         else:
-            # Truncate to Discord's 2000-char message limit
-            webhook.content = content[:2000] if len(content) > 2000 else content
+            # Discord's message limit is 2000 characters.
+            webhook.content = shorten(content, 2000)
 
         try:
             response = webhook.execute()
