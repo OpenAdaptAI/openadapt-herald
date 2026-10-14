@@ -205,6 +205,111 @@ def publish(
 
 
 @app.command()
+def post(
+    file: str = typer.Option(..., "--file", help="UTF-8 text file to post exactly as written"),
+    platform: str = typer.Option("x", help="x (posts) or linkedin (always manual)"),
+    ledger: str = typer.Option(
+        "", envvar="HERALD_POST_LEDGER",
+        help="Append-only JSON Lines ledger. Required for a live post.",
+    ),
+    expect_sha256: str = typer.Option(
+        "",
+        help="Refuse unless the text's SHA-256 (without trailing newlines) equals this "
+        "approved hash. --dry-run --json prints it as content_sha256.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        help="Run the local checks (hash, length, ledger); never open the X account. "
+        "HERALD_DRY_RUN=true has the same effect.",
+    ),
+    retry: bool = typer.Option(
+        False,
+        help="Post again after a check of recent posts found no match for an "
+        "uncertain attempt",
+    ),
+    precheck_timeline: bool = typer.Option(
+        False, help="Read the account's recent posts first and skip if the text is there"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+):
+    """Post an approved file verbatim. No model call, no truncation.
+
+    Exit codes: 0 published, 3 not sent, 4 uncertain (a post may exist;
+    the next run checks the account's recent posts before sending again).
+    """
+    import json
+    from pathlib import Path
+
+    from herald.verbatim import (
+        LINKEDIN_MANUAL_MESSAGE,
+        Ledger,
+        Outcome,
+        PostResult,
+        TweepyXAccount,
+        VerbatimError,
+        VerbatimXPoster,
+        content_sha256,
+        read_post_file,
+        x_weighted_length,
+    )
+
+    def finish(result: PostResult) -> None:
+        if json_output:
+            typer.echo(json.dumps(result.to_dict(), sort_keys=True))
+        else:
+            typer.echo(f"outcome: {result.outcome.value}")
+            typer.echo(f"platform: {result.platform}")
+            typer.echo(f"content_sha256: {result.content_sha256}")
+            if result.weighted_length is not None:
+                typer.echo(f"weighted_length: {result.weighted_length}")
+            if result.url:
+                typer.echo(f"url: {result.url}")
+            typer.echo(f"message: {result.message}")
+        raise typer.Exit(result.exit_code)
+
+    target = platform.strip().lower()
+    try:
+        text = read_post_file(Path(file))
+    except VerbatimError as exc:
+        finish(PostResult(Outcome.NOT_SENT, target, "", str(exc)))
+        return
+
+    sha = content_sha256(text)
+    if target == "linkedin":
+        finish(PostResult(Outcome.NOT_SENT, "linkedin", sha, LINKEDIN_MANUAL_MESSAGE))
+        return
+    if target not in {"x", "twitter"}:
+        finish(PostResult(Outcome.NOT_SENT, target, sha,
+                          f"verbatim posting supports x only, not {platform!r}",
+                          weighted_length=x_weighted_length(text)))
+        return
+
+    settings = _get_settings()
+
+    def account_factory():
+        return TweepyXAccount(
+            consumer_key=settings.twitter_consumer_key,
+            consumer_secret=settings.twitter_consumer_secret,
+            access_token=settings.twitter_access_token,
+            access_token_secret=settings.twitter_access_token_secret,
+        )
+
+    # The option also reads HERALD_POST_LEDGER from the process environment;
+    # the settings fallback picks it up from a .env file.
+    ledger_path = ledger or settings.post_ledger
+    poster = VerbatimXPoster(account_factory, Ledger(Path(ledger_path)) if ledger_path else None)
+    result = poster.post(
+        text,
+        expect_sha256=expect_sha256,
+        # HERALD_DRY_RUN=true keeps every command preview-only, as it does for `publish`.
+        dry_run=dry_run or settings.dry_run,
+        retry=retry,
+        precheck_timeline=precheck_timeline,
+    )
+    finish(result)
+
+
+@app.command()
 def preview(
     repos: str = typer.Option("", help="Comma-separated repos"),
     days: int = typer.Option(7, help="Look back this many days"),

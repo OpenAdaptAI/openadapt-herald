@@ -53,6 +53,9 @@ class HeraldSettings(BaseSettings):
     # Repos (comma-separated: "owner/repo" or local paths)
     repos: str = ""
 
+    # Verbatim posting (`herald post`): append-only ledger path
+    post_ledger: str = ""
+
     # Defaults
     lookback_days: int = 7
     use_consilium: bool = False
