@@ -119,6 +119,10 @@ def test_publish_step_passes_dry_run_to_herald():
     assert re.search(
         r"HERALD_DRY_RUN:\s*\$\{\{\s*inputs\.dry_run\s*&&\s*'true'\s*\|\|\s*'false'\s*\}\}", step
     )
+    # The flag reaches the shell through env, and the script passes it on.
+    assert re.search(r"DRY_RUN_FLAG:\s*\$\{\{\s*inputs\.dry_run\s*&&\s*'--dry-run'", step)
+    (script,) = _run_blocks(step)
+    assert '${DRY_RUN_FLAG:+"$DRY_RUN_FLAG"}' in script
 
 
 def test_publish_step_lets_a_repository_variable_set_the_model():
@@ -225,12 +229,17 @@ def _run_params_step(tmp_path, **env):
     return result, output.read_text()
 
 
+# The payloads print INJECTED-42 only if the shell evaluates them, so the
+# marker never appears just because the raw input was echoed back.
+_RAN = "INJECTED-42"
+
+
 @pytest.mark.parametrize(
     "days",
     [
-        '7"; echo INJECTED; echo "',
-        "7 ; echo INJECTED",
-        "$(echo INJECTED)",
+        '7"; echo INJECTED-$((6*7)); echo "',
+        "7 ; echo INJECTED-$((6*7))",
+        "$(echo INJECTED-$((6*7)))",
         "7\ntype=release",
         "",
         "-1",
@@ -243,8 +252,8 @@ def test_params_step_rejects_days_that_are_not_a_number(tmp_path, days):
         INPUT_CONTENT_TYPE="digest",
         INPUT_DAYS=days,
     )
+    assert _RAN not in result.stdout + result.stderr + outputs, "the shell ran the input"
     assert result.returncode != 0
-    assert "INJECTED" not in result.stdout + result.stderr
     assert "days=" not in outputs
 
 
@@ -252,11 +261,11 @@ def test_params_step_rejects_an_unknown_content_type(tmp_path):
     result, outputs = _run_params_step(
         tmp_path,
         GITHUB_EVENT_NAME="workflow_dispatch",
-        INPUT_CONTENT_TYPE="digest; echo INJECTED",
+        INPUT_CONTENT_TYPE="digest; echo INJECTED-$((6*7))",
         INPUT_DAYS="7",
     )
+    assert _RAN not in result.stdout + result.stderr + outputs, "the shell ran the input"
     assert result.returncode != 0
-    assert "INJECTED" not in result.stdout + result.stderr
     assert "type=" not in outputs
 
 

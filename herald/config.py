@@ -7,10 +7,9 @@ import os
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# The one place the default drafting model is named. Use an alias without a
-# date suffix: the dated Sonnet 4 snapshot used before started returning 404
-# and stopped the weekly digest. Override it with HERALD_DEFAULT_MODEL or
-# --model.
+# The one place the default drafting model is named. Use a current alias, not
+# a dated snapshot: the Sonnet 4 snapshot herald used before is deprecated.
+# Override it with HERALD_DEFAULT_MODEL or --model.
 DEFAULT_MODEL = "claude-sonnet-5-5"
 
 

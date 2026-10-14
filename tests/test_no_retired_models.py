@@ -1,9 +1,10 @@
-"""Fail when shipped code or docs name a Claude model that the API no longer serves.
+"""Fail when shipped code or docs name a Claude model id that is deprecated or retired.
 
-The weekly digest stopped on 2026-07-13 with a 404 for
-`claude-sonnet-4-20250514`, which was hardcoded as the default. Add an id here
-when Anthropic retires it. Tests are not scanned: they may use a retired id as
-an example of a model that returns 404.
+The default was `claude-sonnet-4-20250514`, a deprecated Sonnet 4 snapshot,
+hardcoded in several places. The scheduled weekly digest last ran on
+2026-07-13 and failed in its publish step. Add an id here when Anthropic
+deprecates or retires it. Tests are not scanned: they may use an old id as an
+example of a model that returns 404.
 """
 
 from pathlib import Path
@@ -13,8 +14,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 RETIRED_MODEL_IDS = [
+    # Deprecated.
     "claude-sonnet-4-20250514",
     "claude-opus-4-20250514",
+    # Retired.
+    "claude-opus-4-1-20250805",
+    "claude-3-haiku-20240307",
     "claude-3-7-sonnet-20250219",
     "claude-3-5-haiku-20241022",
     "claude-3-5-sonnet-20241022",
