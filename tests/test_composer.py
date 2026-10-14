@@ -236,18 +236,38 @@ class TestCompose:
         # Thinking counts toward max_tokens, so leave room for it and the drafts.
         assert mock_client.messages.create.call_args[1]["max_tokens"] >= 16000
 
+    # These two check the exception by name, so on code without ComposeError
+    # they fail on the behavior (AttributeError, or no error) and not on an import.
+
     @patch("herald.composer.anthropic.Anthropic")
     def test_compose_without_text_raises(self, mock_anthropic_cls):
-        from herald.composer import ComposeError
-
         mock_client = mock_anthropic_cls.return_value
         mock_client.messages.create.return_value = MagicMock(
             content=[ThinkingBlock(type="thinking", thinking="", signature="sig")],
-            stop_reason="max_tokens",
+            stop_reason="end_turn",
         )
 
-        with pytest.raises(ComposeError, match="max_tokens"):
+        with pytest.raises(Exception) as raised:
             compose([Artifacts(commits=[Commit("a", "A", "2026-01-01", "fix")])], api_key="k")
+        assert type(raised.value).__name__ == "ComposeError", repr(raised.value)
+        assert "returned no text" in str(raised.value)
+
+    @pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal"])
+    @patch("herald.composer.anthropic.Anthropic")
+    def test_compose_rejects_an_unfinished_reply(self, mock_anthropic_cls, stop_reason):
+        # A reply cut off by max_tokens (thinking counts toward it) or by a
+        # refusal is unfinished. It used to fall through to the plain-text
+        # fallback, which made the cut-off JSON the draft for every platform.
+        mock_client = mock_anthropic_cls.return_value
+        mock_client.messages.create.return_value = MagicMock(
+            content=[_text('{"discord": "Shipped v2 with the new')],
+            stop_reason=stop_reason,
+        )
+
+        with pytest.raises(Exception) as raised:
+            compose([Artifacts(commits=[Commit("a", "A", "2026-01-01", "fix")])], api_key="k")
+        assert type(raised.value).__name__ == "ComposeError", repr(raised.value)
+        assert stop_reason in str(raised.value)
 
 
 class TestComposeWithConsilium:

@@ -16,6 +16,7 @@ ContentType = Literal["release", "digest", "spotlight", "introduction"]
 
 # Thinking counts toward max_tokens, and current models think by default.
 _MAX_TOKENS = 16000
+_UNFINISHED_STOP_REASONS = ("max_tokens", "refusal")
 
 # consilium reads the first block of a reply as its text, so it can't use a
 # model that starts its reply with a thinking block. Keep its Claude seat on a
@@ -118,6 +119,14 @@ def compose(
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
+
+    # A reply cut off by max_tokens or a refusal is unfinished. Don't let the
+    # plain-text fallback below turn a half-written reply into a post.
+    if response.stop_reason in _UNFINISHED_STOP_REASONS:
+        raise ComposeError(
+            f"The model stopped before it finished the draft "
+            f"(stop reason: {response.stop_reason}), so herald didn't use the reply."
+        )
 
     # Read blocks by type: the reply can start with a thinking block.
     text = "".join(
